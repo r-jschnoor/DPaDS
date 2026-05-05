@@ -1,0 +1,279 @@
+% ===============================================================================
+% = LaTeX Beamer Template des Arbeitsbereichs Sicherheit in verteilten Systemem
+% = (c) 2016 Prof. Dr. Hannes Federrath, Uni Hamburg, Fachbereich Informatik
+% = https://svs.informatik.uni-hamburg.de
+% =
+% = Weitgehend in Übereinstimmung mit dem Corporate Design 2016 der UHH:
+% = https://www.uni-hamburg.de/beschaeftigtenportal/services/oeffentlichkeitsarbeit/corporate-design.html
+% = 
+% ===============================================================================
+%
+\documentclass[t,aspectratio=169]{beamer} 
+% Option t              Place text of slides at the (vertical) top of the slides.
+% Option handout        Ein PDF ohne Pausen und Overlayeffekte erzeugen.
+% Option aspectratio=43 169 => 16:9, 1610 => 16:10, 43 => 4:3
+\usepackage[utf8]{inputenc}
+\usepackage[ngerman]{babel}
+\usepackage{graphicx,xcolor}
+\usepackage[T1]{fontenc} % 8-Bit-Zeichen; ermöglicht korrektes Kopieren von Umlauten aus dem pdf 
+\bibliography{bib}
+\bibliographystyle{ieee}
+\usepackage{biblatex}
+\addbibresource{bib.bib}
+
+\newcommand{\numUsers}{n}
+\newcommand{\numElements}{k}
+
+% SVS-Theme benutzen
+\usetheme{svs2021}
+
+% =============================
+% = Ab hier Inhalte ändern... 
+% =============================
+
+\title{Security and Privacy in Federated Learning}
+% \subtitle{Ein Vorschlag}
+\author[]{Jonas Müller, Rebekka Schnoor}
+% \institute[Uni Hamburg]{Universität Hamburg · Fachbereich Informatik}
+\date{21.05.2026} % Ausblenden geht mit leerem Inhalt: \date{}
+% \titlegraphic{\uhhlogo} % Logo für Titelseite, UHH-Logo ist Standard
+\eventlocation{Master Project Seminar Data Protection and Data Security, Hamburg, 21$^{st}$ of May 2026} % rechts oben auf Titelseite
+
+\begin{document}
+
+\begin{frame}
+	% Die Titelseite erscheint nach erneutem Übersetzen korrekt.
+	\maketitle
+\end{frame}
+
+\begin{frame}
+	\frametitle{Agenda}
+	% Die Gliederung erscheint nach erneutem Übersetzen korrekt.
+	% Die Gliederung wird im Dokument fortlaufend durch \section{} und \subsection{} definiert. Die Folien selbst haben keinen Einfluss auf die Gliederung.
+	\tableofcontents
+	% Hinweis: Das pandoc-Template benutzt \tableofcontents[hideallsubsections] zur Erzeugung einer Gliederung. Daher werden in der Markdown-Version nur die Überschriften der ersten Ebene (#) im Inhaltsverzeichnis angezeigt. Die normalerweise bei Verwendung von pandoc erzeugten Zwischenfolien für jede Überschrift der ersten Ebene werden im Theme unterdrückt. 
+\end{frame}
+
+\section{Secure Aggregation}
+\subsection{Motivation}
+\subsection{Threat Models}
+\subsection{Protocol Examples}
+
+\begin{frame}{Secure Aggregation}
+\begin{alertblock}{Motivation}
+    Even if the datasets stay with the clients, shared gradients can disclose information and enable inference attacks for both centralized and distributed FL.
+\end{alertblock}
+\pause
+
+\textbf{Threat Models}
+\begin{itemize}
+    \item Honest-but-curious
+    \begin{itemize}
+        \item[] The participant follows the protocol honestly but tries to learn as much as possible from the received messages
+    \end{itemize}
+    \pause
+    \item Malicious
+    \begin{itemize}
+        \item[] The participant can lie or break the protocol
+    \end{itemize}
+    \pause
+    \item Malicious + (limited) access to memory
+    \begin{itemize}
+        \item[] The malicious participant additionally has access to some of the other participant's local memory (i.e. learns their secrets)
+    \end{itemize}
+\end{itemize} 
+\end{frame}
+
+\begin{frame}{Secure Aggregation}
+    
+\begin{alertblock}{Motivation}
+    Even if the datasets stay with the clients, shared gradients can disclose information and enable inference attacks for both centralized and distributed FL.
+\end{alertblock}
+\begin{columns}
+\begin{column}{0.5\textwidth}
+\textbf{Threat Models}
+\begin{itemize}
+    \item Honest-but-curious
+    \item[] \textcolor{black}{Follow protocol but maximize learning}
+    \item Malicious
+    \item[] \textcolor{black}{Can break the protocol}
+    \item Malicious + (limited) access to memory
+    \item[] \textcolor{black}{+ Partial access to secrets}
+\end{itemize} 
+\end{column}
+\begin{column}{0.5\textwidth}
+    \textbf{Challenges}
+    \begin{itemize}
+        \item User dropout
+        \item Limited bandwidth and/or computation power
+        \item Transmission of high dimensional information vectors (gradients)
+        \item Unauthenticated network model
+    \end{itemize}
+\end{column}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Secure Aggregation Protocol by Bonawitz et al. \cite{bonawitz2016practicalsecureaggregationfederated}}
+\begin{columns}[T]
+    
+    \begin{column}{0.5 \textwidth}
+        \textbf{Protocol Summary}
+        \begin{itemize}
+            \item Uses masking vectors to encrypt individual gradients that cancel out in the aggregation
+            \item Robust to user dropout by using secret sharing and a second masking vector
+            \item Secure against malicious adversaries with limited memory access by using OneTime Pads and a sufficiently high threshold for secret reconstruction
+        \end{itemize}
+    \end{column}
+    \begin{column}{0.5\textwidth}
+        \textbf{Costs} \\ for $n$ users and vector dimension $k$
+
+          \begin{tabular}{ll}
+            \\
+            \hline
+            \multicolumn{2}{l}{\textbf{computation}} \\
+            \hline 
+            User & $O(\numUsers^2 + \numElements\numUsers)$ \\
+            Server & $O(\numElements\numUsers^2)$\\
+            \hline
+            \multicolumn{2}{l}{\textbf{communication}} \\
+            \hline
+            User & $O(\numUsers + \numElements)$ \\
+            Server & $O(\numUsers^2 + \numElements\numUsers)$ \\
+            \hline
+            \multicolumn{2}{l}{\textbf{storage}} \\
+            \hline
+            User & $O(\numUsers + \numElements)$ \\
+            Server & $O(\numUsers^2 + \numElements)$ \\
+            
+            \end{tabular}
+            \label{table:costs}
+    \end{column}
+\end{columns}
+\end{frame}
+
+\begin{frame}{SAFELearn: Secure Aggregation for private Federated Learning \cite{cryptoeprint:2021/386}}
+
+            \textbf{2 Main Variants:}\\
+            \begin{itemize}
+                \item Fully Homomorphic Encryption (FHE)
+                \item [] \textcolor{gray}{Uses additively homomorphic encryption scheme}
+                \item [] \textcolor{gray}{Encryption key is split among clients using secret sharing}
+                \begin{enumerate}
+                    \item Clients send encrypted gradients to the server
+                    \item Server aggregates encrypted gradients and sends result to clients
+                    \item Clients can then jointly decrypt the result
+                \end{enumerate}
+                \item Secure Multi-Party Computation (MPC) / Secure Two Party Computation (2PC)
+                \begin{enumerate}
+                    \item Clients split their updates among N non-colluding servers using secret sharing
+                    \item Servers jointly aggregate and send shares back to clients 
+                    \item Clients reconstruct the result
+                \end{enumerate}
+            \end{itemize}
+\end{frame}
+
+\begin{frame}{References}
+\printbibliography
+    
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%% bonus slides %%%%%%%%%%%%%%%%%%%%%
+\begin{frame}{Secure Aggregation Protocol by Bonawitz et al. \cite{bonawitz2016practicalsecureaggregationfederated}}
+    \begin{columns}
+        \begin{column}{0.5\textwidth}
+            %protocol steps
+            \begin{enumerate}
+                \item Users pairwise agree on input perturbation pair $p_{u,v}, p_{v,u}$
+                \item Each user masks their gradient using the sum of all perturbations known and sends the result to the Server
+                \item The Server aggregates as usual because the perturbations are structured to cancel each other
+            \end{enumerate}
+        \end{column}
+        \pause
+        \begin{column}{0.5\textwidth}
+            %up- and downsides
+            \begin{itemize}
+                \item[\textbf{\textcolor{green}{+}}] information theoretically secure through OneTime Pads, even for malicious adversaries with limited memory access
+                \pause
+                \item[\textbf{\textcolor{red}{!}}] strong assumptions:
+                \begin{itemize}
+                    \item[] pairwise secure channels with sufficient bandwidth for secret exchange  
+                    \item[] protocol completion by all users
+                \end{itemize}
+            \end{itemize}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+\begin{frame}{Secure Aggregation Protocol by Bonawitz et al. \cite{bonawitz2016practicalsecureaggregationfederated}}
+    \begin{columns}
+        \begin{column}{0.6\textwidth}
+            %protocol steps
+            \begin{enumerate}
+            \setcounter{enumi}{-1}
+                \item Each user creates a key pair and broadcasts their public key to all other users
+
+                \item \textcolor{gray}{Perturbation vector agreement}
+                \begin{enumerate}
+                    \item Secret sharing: Users distribute perturbation vector among all other users with reconstruction threshold $t$
+                \end{enumerate}
+                
+                \item \textcolor{gray}{Masking + sending of gradients}
+                \begin{enumerate}
+                    \item Only use perturbations shared between surviving users. Reveal secrets of dropped out users if at least $t$ users survived
+                \end{enumerate}
+                
+                \item \textcolor{gray}{Aggregation by server
+                }
+            \end{enumerate}
+        \end{column}
+        \pause
+        \begin{column}{0.4\textwidth}
+            %up- and downsides
+            \begin{itemize}
+                \item[\textbf{\textcolor{green}{+}}] Robustness to user dropout
+                \pause
+                \item[\textbf{\textcolor{red}{!}}] Secret exposure in case of malicious server or delayed update sending; increased communication cost
+            \end{itemize}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+\begin{frame}{Secure Aggregation Protocol by Bonawitz et al. \cite{bonawitz2016practicalsecureaggregationfederated}}
+    \begin{columns}
+        \begin{column}{0.5\textwidth}
+            %protocol steps
+            \begin{enumerate}
+            \setcounter{enumi}{-1}
+                \item \textcolor{gray}{Key pair generation} + generation of masking vector $b$
+                \item \textcolor{gray}{Perturbation vector agreement}
+                \begin{enumerate}
+                    \item \textcolor{gray}{Secret sharing} including $b$
+                \end{enumerate}
+                \item \textcolor{gray}{Masking + sending of gradients:} Use $b$ as second mask
+                \begin{enumerate}
+                    \item \textcolor{gray}{Reveal secrets of dropped out users if at least $t$ users survived:} Each user will only reveal a share of $p_u$ OR $b_u$
+                \end{enumerate}
+                \item \textcolor{gray}{Aggregation by server} 
+                
+            \end{enumerate}
+        \end{column}
+        \pause
+        \begin{column}{0.5\textwidth}
+            %up- and downsides
+            \begin{itemize}
+                \item[\textbf{\textcolor{green}{+}}] For $t > \frac{n}{2}$, all gradients stay masked by either $p$ or $b$; extend to stronger adversaries by increasing threshold
+                \pause
+                \item[\textbf{\textcolor{red}{!}}] Communication cost of $O(kn^2)$
+            \end{itemize}
+            \pause
+            \begin{alertblock}{Reducing Complexity}
+                    Share seeds for PRG instead of full vectors using DH Key Exchange via server
+            \end{alertblock}
+            \pause
+            \begin{alertblock}{Getting rid of secured channel assumption}
+                Setup secured channels via server-mediated DH  $\rightarrow$ adds PFS
+            \end{alertblock}
+        \end{column}
+    \end{columns}
+\end{frame}
+\end{document}
