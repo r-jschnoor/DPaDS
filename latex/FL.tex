@@ -152,24 +152,37 @@
 \end{frame}
 
 \begin{frame}{SAFELearn: Secure Aggregation for private Federated Learning \cite{cryptoeprint:2021/386}}
-
+    \begin{columns}
+        \begin{column}{0.65\textwidth}
             \textbf{2 Main Variants:}\\
             \begin{itemize}
                 \item Fully Homomorphic Encryption (FHE)
                 \item [] \textcolor{gray}{Uses additively homomorphic encryption scheme}
-                \item [] \textcolor{gray}{Encryption key is split among clients using secret sharing}
+                %\item [] \textcolor{gray}{Encryption key is split among clients using secret sharing}
                 \begin{enumerate}
                     \item Clients send encrypted gradients to the server
-                    \item Server aggregates encrypted gradients and sends result to clients
-                    \item Clients can then jointly decrypt the result
+                    \item Server aggregates encrypted gradients and shares result
+                    \item Clients jointly decrypt the updated model
                 \end{enumerate}
-                \item Secure Multi-Party Computation (MPC) / Secure Two Party Computation (2PC)
+                \pause
+                \item Secure Two / Multi-Party Computation (2PC/MPC)
                 \begin{enumerate}
-                    \item Clients split their updates among N non-colluding servers using secret sharing
-                    \item Servers jointly aggregate and send shares back to clients 
-                    \item Clients reconstruct the result
+                    \item Client(s) split updates among servers using secret sharing
+                    \item Servers jointly aggregate and distribute updates
+                    \item Client(s) reconstruct the result
                 \end{enumerate}
             \end{itemize}
+        \end{column}
+        \begin{column}{0.35\textwidth}
+            \pause
+            \begin{itemize}
+                \item[\textcolor{green}{+}] Privacy preservation against malicious servers
+                \item[\textcolor{red}{!}] Assumes honest clients
+                \item[] High communication costs
+                \item[] MPC/2PC variant assumes non-colluding servers
+            \end{itemize}
+        \end{column}
+    \end{columns}
 \end{frame}
 
 \begin{frame}{References}
