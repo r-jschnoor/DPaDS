@@ -185,6 +185,76 @@
     \end{columns}
 \end{frame}
 
+\section{Robust Aggregation}
+\subsection{Motivation}
+\subsection{Threats}
+\begin{frame}{Robust Aggregation}
+    
+\begin{alertblock}{Motivation}
+    The aggregation protocols should be robust against malicious clients trying to manipulate the training process.
+\end{alertblock}
+\begin{columns}
+\begin{column}{0.5\textwidth}
+\textbf{Main Threats}
+\begin{itemize}
+    \item Poisoning Attacks
+    \begin{itemize}
+        \item \textbf{Backdoor:} Implement sensitivity to a specific trigger
+        \item \textbf{Untargeted:} Degrade overall model performance
+        \item \textbf{Targeted:} Degrade performance on apecific class(es)
+    \end{itemize}
+\end{itemize} 
+\end{column}
+\begin{column}{0.5\textwidth}
+    \textbf{Defense Mechanisms}
+    \begin{itemize}
+        \item Robust aggregation rules
+        \begin{itemize}
+            \item Krum
+            \item Trimmed Mean
+            \item FLTrust
+        \end{itemize}
+        \item Anomaly detection on client updates
+    \end{itemize}
+\end{column}
+\end{columns}
+\end{frame}
+
+\subsection{Robust Aggregation Rules}
+\begin{frame}{Robust Aggregation Rules}
+    \begin{itemize}
+        \item \textbf{Krum \cite{Krum}:} Only consider updates that are closest to other updates
+        \item[\textcolor{red}{!}] \textcolor{black}{Assumes few malicious clients and that honest updates cluster together $\rightarrow$ fails for non-IID data}
+        \item \textbf{Trimmed Mean \cite{TrimmedMean}:} For each coordinate of the update vector, cut the top and bottom n\% before averaging
+        \item[\textcolor{red}{!}] \textcolor{black}{neglects correlations between dimensions \\ for fixed, known thresholds, malicious updates can be crafted accordingly}
+        \item \textbf{FLTrust \cite{cao2021fltrust}:} Maintain small root dataset on server to calculate update anchor, weigh client updates by similarity to anchor
+        \item[\textcolor{red}{!}] \textcolor{black}{Assumes trusted, representative dataset available}
+        \pause
+        \item[] \textbf{Under highly non-IID data, honest clients naturally produce very different updates, making it hard to distinguish them from dishonest ones}
+    \end{itemize}
+\end{frame}
+
+\subsection{Trust and Verification}
+\begin{frame}{Trust and Verification}
+    \begin{itemize}
+        \item \textbf{Zero-Knowledge-Proofs} to prove that updates satisfy certain requirements \cite{burkhalter2023rofl}
+        \item[\textcolor{red}{!}] Computationally expensive for large updates
+        \item \textbf{Verifiable Computation:}  Client proves it ran the training algorithm correctly, not just that the output has certain properties
+        \item[\textcolor{red}{!}] Proof generation cost grows exponentially with number of gradient steps
+        \item \textbf{Auditing/Attestation Frameworks:} audit logs + secure hardware attestation instead of cryptographic proofs
+        \item[\textcolor{red}{!}] Requires legal accountability
+    \end{itemize}
+\end{frame}
+
+\section{Privacy-Robustness-Utility Tradeoff}
+\begin{frame}{Privacy-Robustness-Utility Tradeoff \cite{allouah2023trilemma}}
+\begin{itemize}
+    \item Meaningful privacy guarantees introduce noise reducing model performance
+    \item Robust aggregation requires access to individual updates instead of averaged scores
+    \item Robust aggregation on non-IID data will likely discard legitimate updates; trimming or median operations introduce bias
+\end{itemize}
+    
+\end{frame}
 \begin{frame}{References}
 \printbibliography
     
