@@ -201,7 +201,7 @@
     \begin{itemize}
         \item \textbf{Backdoor:} Implement sensitivity to a specific trigger
         \item \textbf{Untargeted:} Degrade overall model performance
-        \item \textbf{Targeted:} Degrade performance on apecific class(es)
+        \item \textbf{Targeted:} Degrade performance on specific class(es)
     \end{itemize}
 \end{itemize} 
 \end{column}
@@ -236,6 +236,7 @@
 
 \subsection{Trust and Verification}
 \begin{frame}{Trust and Verification}
+    \vfill
     \begin{itemize}
         \item \textbf{Zero-Knowledge-Proofs} to prove that updates satisfy certain requirements \cite{burkhalter2023rofl}
         \item[\textcolor{red}{!}] Computationally expensive for large updates
@@ -248,14 +249,11 @@
 
 \section{Privacy-Robustness-Utility Tradeoff}
 \begin{frame}{Privacy-Robustness-Utility Tradeoff \cite{allouah2023trilemma}}
-\begin{itemize}
-    \item Meaningful privacy guarantees introduce noise reducing model performance
-    \item Robust aggregation requires access to individual updates instead of averaged scores
-    \item Robust aggregation on non-IID data will likely discard legitimate updates; trimming or median operations introduce bias
-\end{itemize}
+    \centering
+    \includegraphics[width=0.8\textwidth]{img/tradeoff.jpg}
     
 \end{frame}
-\begin{frame}{References}
+\begin{frame}[allowframebreaks]{References}
 \printbibliography
     
 \end{frame}
