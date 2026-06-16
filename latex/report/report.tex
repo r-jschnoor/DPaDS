@@ -1,0 +1,547 @@
+\documentclass[11pt,twocolumn,a4paper,DIV=calc,parskip=half]{scrartcl}
+\usepackage[protrusion=true,expansion=true]{microtype}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{mathptmx}
+\usepackage[scaled=.92]{helvet}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{multirow}
+\usepackage{subcaption}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+% --------------------------------------------------
+% Placeholder command
+% --------------------------------------------------
+\newcommand{\placeholder}[1]{\textcolor{gray}{\textit{[#1]}}}
+
+\begin{document}
+	
+	% --------------------------------------------------
+	% Front Matter
+	% --------------------------------------------------
+	\title{Navigating the Privacy--Robustness--Performance Trilemma in Federated Learning}
+	\author{Jonas Müller \and Rebekka Schnoor}
+	\date{\today}
+	\maketitle
+	
+	\begin{abstract}
+		\placeholder{%
+			2--4 sentences summarising the paper: motivation (the trilemma), what we did
+			(8-configuration empirical study on MNIST/CIFAR-10 with Flower+Opacus+BLADES),
+			key finding (compounding behaviour, direction of magnitude), and main take-away
+			for practitioners.%
+		}
+	\end{abstract}
+	
+	\tableofcontents
+	
+	% --------------------------------------------------
+	\section{Introduction}
+	% --------------------------------------------------
+	
+	We present a systematic empirical study of the Privacy--Robustness--Performance
+	trilemma in Federated Learning (FL), examining how simultaneously deployed defences
+	interact and compound across all three axes.
+	
+	\subsection{Background and Motivation}
+	\placeholder{%
+		Expand: why FL matters (distributed training without data centralisation; healthcare,
+		finance, mobile); unique threat surface (gradient poisoning, membership inference);
+		why protection is non-trivial; cite~\cite{mcmahan2017fedavg,abadi2016dpsgd}.%
+	}
+	
+	\subsection{Problem Statement}
+	
+	\placeholder{%
+		Formalise the trilemma: individual costs of privacy (DP noise), robustness
+		(aggregation distortion), and efficiency (compression loss); the key observation
+		that combining mechanisms yields super-additive accuracy cost; gap between
+		theoretical lower bound \cite{allouah2023trilemma} and current implementations.%
+	}
+	
+	\subsection{Research Questions}
+	
+	The project is structured around three research questions:
+	\begin{enumerate}
+		\item \textbf{Isolation:} What is the individual cost of each defense mechanism
+		(DP, Byzantine-robust aggregation, gradient compression) in terms of accuracy,
+		communication overhead, and attack success rate, and do our results reproduce
+		the published baselines?
+		\item \textbf{Combination:} How do pairwise and full combinations of the three
+		mechanisms interact? Do the costs compound additively, sub-additively, or
+		super-additively?
+		\item \textbf{Mitigation:} Can simple adjustments --- e.g.\ joint calibration of
+		the DP clipping norm and the robust aggregation threshold --- reduce the
+		compounding effect without sacrificing formal guarantees?
+	\end{enumerate}
+	
+	\subsection{Contributions}
+	
+	\placeholder{%
+		Bullet list mirroring Section~6 of the Exposé:
+		(i) systematic 8-configuration mapping on MNIST/CIFAR-10 with joint trilemma
+		reporting;
+		(ii) reproduction and cross-framework extension of BLADES baselines;
+		(iii) initial test of joint clipping-norm calibration as a mitigation heuristic;
+		(iv) open-source reproducible pipeline.%
+	}
+	
+	\subsection{Structure of the Report}
+	
+	The remainder of the report is organized as follows.
+	Section~\ref{sec:background} provides the theoretical background of all three
+	trilemma axes and derives the joint lower bound.
+	Section~\ref{sec:threat} defines the threat model and evaluation metrics.
+	Section~\ref{sec:method} describes the chosen mechanisms and their
+	parametrization.
+	Section~\ref{sec:setup} details the experimental setup and software stack.
+	Section~\ref{sec:results} presents and analyses the empirical results.
+	Section~\ref{sec:discussion} interprets findings, proposes mitigation, and tests
+	the joint calibration heuristic.
+	Section~\ref{sec:limitations} addresses limitations and future work.
+	Section~\ref{sec:conclusion} concludes.
+	
+	% --------------------------------------------------
+	\section{Background}
+	\label{sec:background}
+	% --------------------------------------------------
+	
+	\subsection{Federated Learning}
+	
+	\placeholder{%
+		FedAvg~\cite{mcmahan2017fedavg}: global model, local SGD, aggregation.
+		IID vs.\ non-IID data; communication rounds; client sampling. Image/graphic here?%
+	}
+	
+	Federated Learning is a machine learning framework that consists of a central server and multiple clients. Each client holds an individual dataset for computing their local updates. The central server coordinates the training process and aggregates the updates.
+	For each round of training, the central server distributes the current model, waits for the clients to compute the local updates and then collects and aggregates those updates to obtain a global model update that is then shared with the clients to initialize the next round.
+	
+	The most common algorithm for aggregation is FedAvg~\cite{mcmahan2017fedavg}, where the gloal update is computed as a weighted average of the individual updates.
+	
+	\subsection{Privacy: Differential Privacy}
+	
+	\subsubsection{Definition and Composition}
+	
+	\placeholder{%
+		$(\epsilon,\delta)$-DP definition; sensitivity; Gaussian mechanism;
+		composition theorems; Rényi DP~\cite{mironov2017renyi} for tighter accounting.%
+	}
+	
+	\subsubsection{DP-SGD}
+	
+	\placeholder{%
+		Per-sample gradient clipping to bound $\ell_2$-sensitivity;
+		calibrated noise addition; privacy amplification by sampling;
+		Opacus accountant~\cite{yousefpour2021opacus}.%
+	}
+	
+	\subsubsection{Central vs.\ Local DP in FL}
+	
+	\placeholder{%
+		Central DP: noise at server post-aggregation.
+		Local DP: noise at each client before upload.
+		Trade-offs in trust model and effective noise magnitude.%
+	}
+	
+	Central DP is applied by the server by adding noise after the aggregation. //TODO Threat model and applications
+	
+	In our case, the local updates are to be protected from inference attacks, requiring local DP. This is achieved by each client adding the noise locally before sharing the updates. The effective noise magnitude increases in this case //TODO numbers, reference!!
+	
+	\subsection{Robustness: Byzantine-Tolerant Aggregation}
+	
+	\subsubsection{Byzantine Fault Model}
+	
+	\placeholder{%
+		Definition of $\eta$-fraction Byzantine adversary; threat capabilities
+		(arbitrary gradient manipulation); impossibility results without redundancy.%
+	}
+	
+	A $\eta$-fraction Byzantine adversary means that $\eta$\% of the clients are communicating manipulated gradients to poison the central model, e.g. insert a backdoor, degrade the general performance or enable label flipping attacks.
+	
+	\subsubsection{Krum}
+	
+	\placeholder{%
+		Blanchard et al.~\cite{blanchard2017krum}: selects update closest to its
+		$n-f-2$ neighbours; provably Byzantine-tolerant but accuracy-limited under
+		heterogeneity.%
+	}
+	
+	Krum~\cite{blanchard2017krum} was introduced by Blanchard et al. in 2017 to increase robustness to byzantine adversaries by only processing updates that are closest to their XX neighbors, effectively only considering the densest update cluster of size XX. This renders the training process provably Byzantine-tolerant but assumes that honest updates cluster together, which only holds true for similar data distributions across clients. Under data heterogeneity this leads to a decrease in model performance due to the fact that honest updates are discarded if they differ too much from the majority of updates.
+	
+	\subsubsection{FLTrust}
+	
+	\placeholder{%
+		Cao et al.~\cite{cao2021fltrust}: server holds small root dataset; cosine
+		similarity-based trust scores clip client contributions;
+		advantages under data heterogeneity.%
+	}
+	
+	FLTrust~\cite{cao2021fltrust} provides protection against malicious updates by holding a small root dataset within the server that is used to compute an update anchor each round. The client updates are then weighted by the cosine similarity to this anchor. The central assumption here is that such a dataset exists and is available to the server, assuming knowledge about the general data distribution across all clients.
+	
+	
+	\subsection{Performance: Communication Efficiency}
+	
+	\subsubsection{Top-$k$ Gradient Sparsification}
+	
+	\placeholder{%
+		Transmit only $k$ largest gradient components~\cite{aji2017sparse,shi2019topk};
+		error feedback; interaction with clipping.
+		$k$ as fraction of dimension $d$.%
+	}
+	
+	Top-$k$ gradient sparsification~\cite{aji2017sparse, shi2019topk} is a technique to reduce communication while uploading the grandients by only transmitting the $k$ largest gradient components where $k$ is a fixed fraction of the model dimension $d$.
+	//TODO effects on performance
+	
+	\subsubsection{Relation to Model Dimensionality}
+	
+	\placeholder{%
+		The term $d/(\epsilon^2 n)$ in the theoretical lower bound~\cite{allouah2023trilemma}
+		shows efficiency is a fundamental third axis, not merely an engineering concern.%
+	}
+	
+	\subsection{The Privacy--Robustness--Performance Trilemma}
+	
+	\subsubsection{Theoretical Lower Bound}
+	
+	\placeholder{%
+		Allouah et al.~\cite{allouah2023trilemma}: 
+		The cross-term $\eta/\epsilon^2$ shows multiplicative, not additive, interaction
+		between privacy and robustness.
+		SMEA (matches bound, exponential cost) vs.\ CAF (polynomial approximation).%
+	}
+	
+	Allouha et al.~\cite{allouah2023trilemma} showed that any algorithm guaranteeing
+	$\epsilon$-local DP and robustness against an $\eta$-fraction Byzantine adversary incurs a mean-estimation error of at least
+	$\Omega\!\left(\frac{\eta}{\epsilon^2} + \frac{d}{\epsilon^2 n} + \eta G^2\right)$.
+	
+	The cross-term $\eta/\epsilon^2$ shows that the cost for privacy and robustness interact multiplicative instead of additive.
+	
+	\subsubsection{Efficiency Axis Extension}
+	
+	\placeholder{%
+		Position paper~\cite{allouah2023position}: extends framework to efficiency;
+		identifies theory--practice gap as open problem; calls for joint benchmarks.%
+	}
+	
+	\subsubsection{Empirical Evidence of Compounding}
+	
+	\placeholder{%
+		Guerraoui et al.~\cite{guerraoui2021dpbyz}: naive DP+Byzantine combination
+		degrades performance beyond either alone.
+		Lack of systematic 3-axis empirical mapping motivates this work.%
+	}
+	
+	% --------------------------------------------------
+	\section{Threat Model and Metrics}
+	\label{sec:threat}
+	% --------------------------------------------------
+	
+	\subsection{Threat Model}
+	
+	\placeholder{%
+		Adversary fraction $\eta$; Byzantine capability (arbitrary gradients);
+		label-flipping attack (Fang et al.~\cite{fang2020poisoning}) as concrete
+		instantiation; honest-but-curious server (motivates DP);
+		no collusion between Byzantine clients and passive server.%
+	}
+	
+	We assume an honest-but-curious central server motivating the DP requirements. The clients are assumed to be honest except for the fixed Byzantine fraction that is maliciously manipulating their local updates. This results in the requirement for a robustness preserving technique.
+	No collusion is assumed between clients and the server.
+	
+	\subsection{Evaluation Metrics}
+	\label{sec:metrics}
+	
+	Every configuration is evaluated simultaneously across all three trilemma axes:
+	
+	\paragraph{Privacy.}
+	\placeholder{%
+		Accumulated $(\epsilon,\delta)$-DP budget after $T$ rounds (Rényi accountant);
+		membership inference attack success rate (shadow model baseline).%
+	}
+	
+	\begin{itemize}
+		\item Accumulated $(\epsilon,\delta)$-DP budget after $T$ rounds
+		\item Membership inference attack success rate
+	\end{itemize}
+	
+	\paragraph{Robustness.}
+	\placeholder{%
+		Attack success rate (ASR) under label-flipping;
+		accuracy gap $\Delta\text{acc}$ vs.\ clean FedAvg.%
+	}
+	
+	\begin{itemize}
+		\item Label-flipping attack success rate
+		\item Accuracy gap vs. baseline to capture untargeted performance degradation
+	\end{itemize}
+	
+	\paragraph{Performance.}
+	\placeholder{%
+		Test accuracy on held-out data;
+		bytes per client per round (communication cost);
+		wall-clock training time.%
+	}
+	
+	\begin{itemize}
+		\item Test accuracy on held-out data
+		\item Communication cost (bytes sent per client per round)
+		\item Training time		
+	\end{itemize}
+	
+	\subsection{Trilemma Visualisation}
+	
+	\placeholder{%
+		Radar / simplex chart positioning each of the 8 configurations relative to the
+		three axes, analogous to Figure~1 of~\cite{allouah2023position}.
+		Include actual figure once results are available.%
+	}
+	
+	% --------------------------------------------------
+	\section{Methods}
+	\label{sec:method}
+	% --------------------------------------------------
+	
+	\subsection{Baseline: FedAvg}
+	
+	\placeholder{%
+		Standard weighted average aggregation~\cite{mcmahan2017fedavg};
+		serves as the reference point for all accuracy gaps;
+		no privacy, robustness, or compression applied.%
+	}
+	
+	\subsection{Privacy Mechanism: DP-SGD}
+	
+	\placeholder{%
+		Per-sample clipping norm $C$; noise multiplier $\sigma$; privacy budget
+		$\epsilon \in \{1, 5, 10\}$, $\delta = 10^{-5}$;
+		Rényi accounting via Opacus~\cite{yousefpour2021opacus}.%
+	}
+	
+	\subsection{Robustness Mechanism: FLTrust}
+	
+	\placeholder{%
+		Server root dataset construction; trust score computation;
+		cosine similarity clipping; parameter: root dataset size;
+		implementation via BLADES~\cite{li2024blades}.%
+	}
+	
+	\subsection{Performance Mechanism: Top-$k$ Sparsification}
+	
+	\placeholder{%
+		Fraction $k \in \{1\%, 10\%\}$ of $d$ transmitted per round;
+		error feedback accumulator;
+		custom Flower strategy wrapper;
+		interaction with gradient clipping discussed in Section~\ref{sec:interaction}.%
+	}
+	
+	\subsection{Mechanism Interaction Effects}
+	\label{sec:interaction}
+	
+	\placeholder{%
+		Theoretical analysis of how clipping (DP) and cosine-similarity clipping
+		(FLTrust) may amplify each other; how sparsification changes the effective
+		gradient distribution seen by the aggregator;
+		hypothesis: super-additive cost for the full combination.%
+	}
+	
+	% --------------------------------------------------
+	\section{Experimental Setup}
+	\label{sec:setup}
+	% --------------------------------------------------
+	
+	\subsection{Experimental Grid}
+	
+	\placeholder{%
+		All $2^3 = 8$ on/off combinations of (DP-SGD, FLTrust, Top-$k$);
+		label each configuration with a short identifier (e.g.\ \textsc{Base},
+		\textsc{DP}, \textsc{Rob}, \textsc{Com}, \textsc{DP+Rob},
+		\textsc{DP+Com}, \textsc{Rob+Com}, \textsc{All}).
+		Table with 8 rows $\times$ 3 mechanism columns.%
+	}
+	
+	\subsection{Datasets}
+	
+	\placeholder{%
+		MNIST: simple baseline, reproducibility check against BLADES published numbers;
+		image size, number of classes, train/test split.
+		CIFAR-10: scalability test; used in the position paper's empirical evidence
+		table~\cite{allouah2023position};
+		image size, number of classes, train/test split.
+		Data partitioning strategy across clients (IID / Dirichlet non-IID).%
+	}
+	
+	\subsection{Fixed Hyperparameters}
+	
+	\placeholder{%
+		Justify each choice with respect to BLADES baselines.%
+	}
+	
+	Number of clients $n$; Byzantine fraction $\eta$; number of communication
+	rounds $T$; local epochs; local batch size; learning rate;
+	model architecture (CNN for MNIST, ResNet-\placeholder{X} for CIFAR-10).
+	
+	\subsection{Software Stack}
+	
+	\begin{itemize}
+		\item \textbf{Flower} (flwr)~\cite{beutel2020flower} --- FL orchestration,
+		client/server simulation, strategy interface.
+		\item \textbf{Opacus}~\cite{yousefpour2021opacus} --- DP-SGD, Rényi DP
+		accounting, gradient clipping.
+		\item \textbf{FLTrust}~\cite{cao2021fltrust} --- FLTrust defense implementation.
+		\item \textbf{BLADES}~\cite{li2024blades} --- Byzantine attack implementations; PyTorch/Ray backend compatible with Flower.
+		\item \textbf{Custom} --- Top-$k$ gradient sparsification wrapper.
+	\end{itemize}
+	
+	\placeholder{%
+		Software versions; hardware (GPU/CPU); random seed management; number of
+		independent runs per configuration.%
+	}
+	
+	\subsection{Reproducibility}
+	
+	\placeholder{%
+		Pointer to open-source repository; instructions to replicate all 8 configurations;
+		fixed random seeds; containerization (Docker/Conda environment file).%
+	}
+	
+	% --------------------------------------------------
+	\section{Results}
+	\label{sec:results}
+	% --------------------------------------------------
+	
+	\subsection{Baseline Reproduction (RQ1 -- Sanity Check)}
+	
+	\placeholder{%
+		FedAvg and FLTrust baselines on MNIST vs.\ published BLADES numbers;
+		table: our accuracy / ASR vs.\ reported values; discussion of any deviations.%
+	}
+	
+	\subsection{Isolation: Individual Mechanism Costs (RQ1)}
+	
+	\placeholder{%
+		One subsection or figure per mechanism;
+		accuracy vs.\ $\epsilon$ curve for DP-SGD;
+		ASR vs.\ $\eta$ for FLTrust;
+		accuracy / bytes trade-off for Top-$k$ at $k \in \{1\%, 10\%\}$;
+		results on both MNIST and CIFAR-10.%
+	}
+	
+	\subsubsection{DP-SGD Cost}
+	\placeholder{Accuracy curves for $\epsilon \in \{1,5,10\}$; privacy budget consumed.}
+	
+	\subsubsection{FLTrust Cost}
+	\placeholder{Accuracy gap and ASR for varying Byzantine fractions.}
+	
+	\subsubsection{Top-$k$ Sparsification Cost}
+	\placeholder{Accuracy, bytes per round, and wall-clock time for $k \in \{1\%,10\%\}$.}
+	
+	\subsection{Combination: Pairwise and Full Interactions (RQ2)}
+	
+	\placeholder{%
+		Main results table: 8 configurations $\times$ all metrics;
+		additive vs.\ super-additive cost analysis;
+		focus on DP+FLTrust interaction;
+		radar / simplex visualisation (Figure~\placeholder{X}).%
+	}
+	
+	\subsubsection{DP + Robustness}
+	\placeholder{Effect on accuracy and ASR; comparison to individual costs.}
+	
+	\subsubsection{DP + Compression}
+	\placeholder{Effect on accuracy and communication cost; interaction with noise.}
+	
+	\subsubsection{Robustness + Compression}
+	\placeholder{Effect on ASR and bytes per round.}
+	
+	\subsubsection{Full Combination (DP + Robustness + Compression)}
+	\placeholder{Worst-case configuration; super-additive compounding quantified.}
+	
+	\subsection{MNIST vs.\ CIFAR-10 Comparison}
+	
+	\placeholder{%
+		How results scale with dataset complexity;
+		does the compounding pattern hold across both?%
+	}
+	
+	% --------------------------------------------------
+	\section{Discussion}
+	\label{sec:discussion}
+	% --------------------------------------------------
+	
+	\subsection{Interpretation of Compounding Effects}
+	
+	\placeholder{%
+		Relate empirical findings to the theoretical cross-term $\eta/\epsilon^2$;
+		characterise compounding as additive / sub-additive / super-additive per
+		configuration pair; intuition for why DP clipping and FLTrust cosine clipping
+		interact destructively.%
+	}
+	
+	\subsection{Mitigation: Joint Clipping-Norm Calibration (RQ3)}
+	
+	\placeholder{%
+		Heuristic: jointly set DP clipping norm $C$ and FLTrust trust threshold to
+		minimise redundant gradient suppression;
+		description of the calibration procedure;
+		results vs.\ uncalibrated worst-case combination;
+		formal guarantee preservation argument.%
+	}
+	
+	\subsection{Practical Recommendations}
+	
+	\placeholder{%
+		When to prioritise which axis;
+		safe operating region in the trilemma space;
+		guidance on $(\epsilon,k)$ parameter selection given a robustness requirement.%
+	}
+	
+	% --------------------------------------------------
+	\section{Limitations and Future Work}
+	\label{sec:limitations}
+	% --------------------------------------------------
+	
+	\subsection{Limitations}
+	
+	\placeholder{%
+		Single attack type (label-flipping); single aggregation rule (FLTrust);
+		membership inference approximation (shadow model only);
+		limited $\epsilon$ grid; MNIST/CIFAR-10 may not represent medical/financial FL.%
+	}
+	
+	\subsection{Future Work}
+	
+	\placeholder{%
+		Extend to Krum, SMEA, CAF aggregators;
+		stronger attacks (model poisoning~\cite{fang2020poisoning});
+		LoRA+DP reparametrisation~\cite{liu2025lorfl} for the efficiency axis;
+		theoretical tightness of joint calibration heuristic.%
+	}
+	
+	% --------------------------------------------------
+	\section{Conclusion}
+	\label{sec:conclusion}
+	% --------------------------------------------------
+	
+	\placeholder{%
+		Restate research questions and answers;
+		key quantitative finding (e.g.\ full combination degrades accuracy by $X$\% beyond
+		sum of individual costs);
+		mitigation heuristic reduces compounding by $Y$\% without formal guarantee loss;
+		open-source pipeline as contribution to the community.%
+	}
+	
+	% --------------------------------------------------
+	% References
+	% --------------------------------------------------
+	\bibliographystyle{IEEEtran}
+	\bibliography{bib.bib}
+	
+\end{document}
