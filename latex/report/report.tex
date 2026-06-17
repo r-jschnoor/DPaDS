@@ -7,7 +7,8 @@
 \usepackage{mathptmx}
 \usepackage[scaled=.92]{helvet}
 \usepackage{booktabs}
-\usepackage{amsmath}
+\usepackage{amsmath, amsthm}
+\newtheorem{theorem}{Theorem}
 \usepackage{amssymb}
 \usepackage{enumitem}
 \usepackage{xcolor}
@@ -15,6 +16,7 @@
 \usepackage{subcaption}
 \usepackage{tikz}
 \usepackage{pgfplots}
+\usepackage[table,xcdraw]{xcolor}
 \pgfplotsset{compat=1.18}
 
 % --------------------------------------------------
@@ -34,9 +36,9 @@
 	
 	\begin{abstract}
 		\placeholder{%
-			2--4 sentences summarising the paper: motivation (the trilemma), what we did
+			2--4 sentences summarizing the paper: motivation (the trilemma), what we did
 			(8-configuration empirical study on MNIST/CIFAR-10 with Flower+Opacus+BLADES),
-			key finding (compounding behaviour, direction of magnitude), and main take-away
+			key finding (compounding behavior, direction of magnitude), and main take-away
 			for practitioners.%
 		}
 	\end{abstract}
@@ -48,24 +50,49 @@
 	% --------------------------------------------------
 	
 	We present a systematic empirical study of the Privacy--Robustness--Performance
-	trilemma in Federated Learning (FL), examining how simultaneously deployed defences
+	trilemma in Federated Learning (FL), examining how simultaneously deployed defenses
 	interact and compound across all three axes.
+	
+	\placeholder{%
+		Summarize results and contributions.%
+	}
 	
 	\subsection{Background and Motivation}
 	\placeholder{%
-		Expand: why FL matters (distributed training without data centralisation; healthcare,
+		Expand: why FL matters (distributed training without data centralization; healthcare,
 		finance, mobile); unique threat surface (gradient poisoning, membership inference);
-		why protection is non-trivial; cite~\cite{mcmahan2017fedavg,abadi2016dpsgd}.%
+		why protection is non-trivial; cite~\cite{mcmahan2017fedavg,abadi2016deep}.%
 	}
+	
+	In the past ten years, federated learning has emerged as a framework for achieving distributed training without the need for data centralization. This is of particular interest when processing sensitive data, such as in healthcare or mobile applications. The local training allows to leave the data with the clients but opens new attack surfaces for model poisoning during training through the transmission of manipulated updates. Also, the transmitted gradients can still leak information about the used training data set. Additionally, gradient transmission at each round causes significant communication cost, especially for complex models.
+	
+	In an effort to fortify the resilience of models and safeguard client privacy, numerous methodologies have been implemented in recent years. Robustness-enhancing methods are designed to detect malicious updates by assuming a significant deviation from the honest majority. Privacy-preserving algorithms add a mask or calibrated noise to the local updates before transmitting them to the central server.
 	
 	\subsection{Problem Statement}
 	
 	\placeholder{%
-		Formalise the trilemma: individual costs of privacy (DP noise), robustness
+		Formalize the trilemma: individual costs of privacy (DP noise), robustness
 		(aggregation distortion), and efficiency (compression loss); the key observation
 		that combining mechanisms yields super-additive accuracy cost; gap between
 		theoretical lower bound \cite{allouah2023trilemma} and current implementations.%
 	}
+	
+	Ensuring model robustness and client privacy while balancing communication cost and model accuracy has been identified as a significant challenge.
+	Adding privacy-enhancing noise to individual updates reduces a malicious server's ability to extract information about local datasets, while simultaneously reducing model accuracy.
+	Discarding unusual updates improves robustness against Byzantine adversaries but risks disregarding legitimate updates, particularly in non-IID settings.
+	Compression techniques that reduce transmission load limit the information transmitted to the server and thus reduce model accuracy.
+	
+	In 2023, Allouah et al.~\cite{allouah2023trilemma} proved Theorem \ref{theorem:lowerBound}, stating that the combination of such methods yields a lower bound for the expected training error that exceeds the sum of the individual cost for robustness and privacy by a multiplicative term.
+	\begin{theorem}
+		Consider distributed mean estimation in $\mathbb{R}^d$ with $n$ users, of which an $\eta$-fraction may behave maliciously. Any algorithm, producing an estimate $\hat{\mu}$ of the true mean $\mu\in\mathbb{R}^d$ of inputs, and achieving $(\varepsilon-\delta)$-local DP and robustness to $\eta$-corruption must incur an estimated error
+		\begin{equation}
+			\mathbb{E}\parallel \hat{\mu}-\mu\parallel _{2}^{2} = \tilde{\Omega}(\frac{\eta}{\varepsilon^{2}}+\frac{d}{\varepsilon^{2}n}+\eta G^{2}).
+		\end{equation}
+		\label{theorem:lowerBound}
+	\end{theorem}
+	
+	A position paper by the same group~\cite{allouah2023balancing} highlights a gap between the theoretical lower bound and current
+	implementations. 
 	
 	\subsection{Research Questions}
 	
@@ -121,10 +148,13 @@
 		IID vs.\ non-IID data; communication rounds; client sampling. Image/graphic here?%
 	}
 	
-	Federated Learning is a machine learning framework that consists of a central server and multiple clients. Each client holds an individual dataset for computing their local updates. The central server coordinates the training process and aggregates the updates.
-	For each round of training, the central server distributes the current model, waits for the clients to compute the local updates and then collects and aggregates those updates to obtain a global model update that is then shared with the clients to initialize the next round.
+	Federated Learning is a machine learning framework comprising a central server and multiple distributed clients. Each client maintains a
+	local dataset to compute updates for the global model. The central server orchestrates the training process by distributing the current
+	global model, collecting client updates, and aggregating them to produce a new global model update. This update is then distributed to
+	clients to initiate the next training round. 
 	
-	The most common algorithm for aggregation is FedAvg~\cite{mcmahan2017fedavg}, where the gloal update is computed as a weighted average of the individual updates.
+	The most widely used aggregation method is FedAvg~\cite{mcmahan2017fedavg}, which computes
+	the global update as a weighted average of the client-local model updates.
 	
 	\subsection{Privacy: Differential Privacy}
 	
@@ -132,7 +162,7 @@
 	
 	\placeholder{%
 		$(\epsilon,\delta)$-DP definition; sensitivity; Gaussian mechanism;
-		composition theorems; Rényi DP~\cite{mironov2017renyi} for tighter accounting.%
+		composition theorems; Rényi DP~\cite{Mironov_2017} for tighter accounting.%
 	}
 	
 	\subsubsection{DP-SGD}
@@ -169,12 +199,12 @@
 	\subsubsection{Krum}
 	
 	\placeholder{%
-		Blanchard et al.~\cite{blanchard2017krum}: selects update closest to its
-		$n-f-2$ neighbours; provably Byzantine-tolerant but accuracy-limited under
+		Blanchard et al.~\cite{Krum}: selects update closest to its
+		$n-f-2$ neighbors; provably Byzantine-tolerant but accuracy-limited under
 		heterogeneity.%
 	}
 	
-	Krum~\cite{blanchard2017krum} was introduced by Blanchard et al. in 2017 to increase robustness to byzantine adversaries by only processing updates that are closest to their XX neighbors, effectively only considering the densest update cluster of size XX. This renders the training process provably Byzantine-tolerant but assumes that honest updates cluster together, which only holds true for similar data distributions across clients. Under data heterogeneity this leads to a decrease in model performance due to the fact that honest updates are discarded if they differ too much from the majority of updates.
+	Krum~\cite{Krum}, proposed by Blanchard et al. in 2017, enhances robustness to Byzantine adversaries by selecting updates closest to their XX neighbors, effectively focusing on the densest cluster of updates of size XX. This ensures the training process is provably Byzantine-tolerant but relies on the assumption that honest updates cluster together, which only holds when data distributions across clients are similar. Under data heterogeneity, this assumption breaks down, leading to performance degradation because honest updates may be discarded if they deviate significantly from the majority.
 	
 	\subsubsection{FLTrust}
 	
@@ -184,7 +214,9 @@
 		advantages under data heterogeneity.%
 	}
 	
-	FLTrust~\cite{cao2021fltrust} provides protection against malicious updates by holding a small root dataset within the server that is used to compute an update anchor each round. The client updates are then weighted by the cosine similarity to this anchor. The central assumption here is that such a dataset exists and is available to the server, assuming knowledge about the general data distribution across all clients.
+	FLTrust~\cite{cao2021fltrust} mitigates malicious updates by maintaining a small root dataset on the server, which is used to compute an
+	update anchor at each training round. Client updates are then weighted based on their cosine similarity to this anchor. The method relies
+	on the assumption that the server has access to a dataset representing the general data distribution across all clients.
 	
 	
 	\subsection{Performance: Communication Efficiency}
@@ -192,12 +224,12 @@
 	\subsubsection{Top-$k$ Gradient Sparsification}
 	
 	\placeholder{%
-		Transmit only $k$ largest gradient components~\cite{aji2017sparse,shi2019topk};
+		Transmit only $k$ largest gradient components~\cite{aji2017topk};
 		error feedback; interaction with clipping.
 		$k$ as fraction of dimension $d$.%
 	}
 	
-	Top-$k$ gradient sparsification~\cite{aji2017sparse, shi2019topk} is a technique to reduce communication while uploading the grandients by only transmitting the $k$ largest gradient components where $k$ is a fixed fraction of the model dimension $d$.
+	Top-$k$ gradient sparsification~\cite{aji2017topk} is a technique to reduce communication while uploading the gradients by only transmitting the $k$ largest gradient components where $k$ is a fixed fraction of the model dimension $d$.
 	//TODO effects on performance
 	
 	\subsubsection{Relation to Model Dimensionality}
@@ -218,7 +250,7 @@
 		SMEA (matches bound, exponential cost) vs.\ CAF (polynomial approximation).%
 	}
 	
-	Allouha et al.~\cite{allouah2023trilemma} showed that any algorithm guaranteeing
+	Allouah et al.~\cite{allouah2023trilemma} showed that any algorithm guaranteeing
 	$\epsilon$-local DP and robustness against an $\eta$-fraction Byzantine adversary incurs a mean-estimation error of at least
 	$\Omega\!\left(\frac{\eta}{\epsilon^2} + \frac{d}{\epsilon^2 n} + \eta G^2\right)$.
 	
@@ -227,14 +259,14 @@
 	\subsubsection{Efficiency Axis Extension}
 	
 	\placeholder{%
-		Position paper~\cite{allouah2023position}: extends framework to efficiency;
+		Position paper~\cite{allouah2023balancing}: extends framework to efficiency;
 		identifies theory--practice gap as open problem; calls for joint benchmarks.%
 	}
 	
 	\subsubsection{Empirical Evidence of Compounding}
 	
 	\placeholder{%
-		Guerraoui et al.~\cite{guerraoui2021dpbyz}: naive DP+Byzantine combination
+		Guerraoui et al.~\cite{guerraoui2021differentialprivacybyzantineresilience}: naive DP+Byzantine combination
 		degrades performance beyond either alone.
 		Lack of systematic 3-axis empirical mapping motivates this work.%
 	}
@@ -253,13 +285,12 @@
 		no collusion between Byzantine clients and passive server.%
 	}
 	
-	We assume an honest-but-curious central server motivating the DP requirements. The clients are assumed to be honest except for the fixed Byzantine fraction that is maliciously manipulating their local updates. This results in the requirement for a robustness preserving technique.
-	No collusion is assumed between clients and the server.
+	We assume an honest-but-curious central server that adheres to protocol specifications but may attempt to infer private information from transmitted updates, motivating the use of differential privacy (DP) to safeguard client data. The adversary is characterized by a fraction $\eta$ of malicious clients, capable of arbitrarily manipulating gradients (e.g., through label-flipping attacks, as formalized in Fang et al.~\cite{fang2020poisoning}). These clients aim to corrupt the global model by injecting adversarial updates. Crucially, we assume no collusion between Byzantine clients and the server, restricting adversarial behavior to local manipulations of gradients. This assumption simplifies the analysis while maintaining practical relevance for decentralized learning systems.
 	
 	\subsection{Evaluation Metrics}
 	\label{sec:metrics}
 	
-	Every configuration is evaluated simultaneously across all three trilemma axes:
+	As suggested by Allouah et al.~\cite{allouah2023balancing}, every configuration is evaluated simultaneously across all three trilemma axes:
 	
 	\paragraph{Privacy.}
 	\placeholder{%
@@ -267,10 +298,7 @@
 		membership inference attack success rate (shadow model baseline).%
 	}
 	
-	\begin{itemize}
-		\item Accumulated $(\epsilon,\delta)$-DP budget after $T$ rounds
-		\item Membership inference attack success rate
-	\end{itemize}
+	The privacy objective is quantified by the accumulated $(\epsilon,\delta)$-differential privacy (DP) budget after $T$ rounds, tracked using the Rényi accountant~\cite{mironov2019rényi}. Additionally, the vulnerability to membership inference attacks is assessed by measuring the success rate of such attacks against a shadow model baseline~\cite{song2019membership}.
 	
 	\paragraph{Robustness.}
 	\placeholder{%
@@ -278,10 +306,7 @@
 		accuracy gap $\Delta\text{acc}$ vs.\ clean FedAvg.%
 	}
 	
-	\begin{itemize}
-		\item Label-flipping attack success rate
-		\item Accuracy gap vs. baseline to capture untargeted performance degradation
-	\end{itemize}
+	Robustness is evaluated by the attack success rate (ASR) under label-flipping attacks and the accuracy gap $\Delta_{acc}$ relative to a clean FedAvg baseline. The accuracy gap captures untargeted performance degradation caused by adversarial clients, providing a measure of resilience to Byzantine behavior.
 	
 	\paragraph{Performance.}
 	\placeholder{%
@@ -290,17 +315,13 @@
 		wall-clock training time.%
 	}
 	
-	\begin{itemize}
-		\item Test accuracy on held-out data
-		\item Communication cost (bytes sent per client per round)
-		\item Training time		
-	\end{itemize}
+	The performance metric includes test accuracy on held-out data, communication cost (bytes sent per client per round), and wall-clock training time. These metrics collectively assess the trade-off between model utility, resource efficiency, and computational feasibility in decentralized learning systems.
 	
-	\subsection{Trilemma Visualisation}
+	\subsection{Trilemma Visualization}
 	
 	\placeholder{%
 		Radar / simplex chart positioning each of the 8 configurations relative to the
-		three axes, analogous to Figure~1 of~\cite{allouah2023position}.
+		three axes, analogous to Figure~1 of~\cite{allouah2023balancing}.
 		Include actual figure once results are available.%
 	}
 	
@@ -358,22 +379,39 @@
 	% --------------------------------------------------
 	
 	\subsection{Experimental Grid}
+	The experimental grid is described in table \ref{table:grid}.
 	
-	\placeholder{%
-		All $2^3 = 8$ on/off combinations of (DP-SGD, FLTrust, Top-$k$);
-		label each configuration with a short identifier (e.g.\ \textsc{Base},
-		\textsc{DP}, \textsc{Rob}, \textsc{Com}, \textsc{DP+Rob},
-		\textsc{DP+Com}, \textsc{Rob+Com}, \textsc{All}).
-		Table with 8 rows $\times$ 3 mechanism columns.%
-	}
+	\begin{table}[h]
+		\centering
+		\begin{tabular}{llll}
+			\hline
+			\rowcolor[HTML]{C0C0C0} 
+			\textbf{Identifier} & DP-SGD & FLTrust & Top-k \\ \hline
+			Base &  &  &  \\ \hline
+			\rowcolor[HTML]{EFEFEF} 
+			DP & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} &  &  \\ \hline
+			ROB &  & \multicolumn{1}{c}{x} &  \\ \hline
+			\rowcolor[HTML]{EFEFEF} 
+			COM &  &  & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} \\ \hline
+			DP+ROB & \multicolumn{1}{c}{x} & \multicolumn{1}{c}{x} &  \\ \hline
+			\rowcolor[HTML]{EFEFEF} 
+			DP+COM & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} &  & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} \\ \hline
+			ROB+COM &  & \multicolumn{1}{c}{x} & \multicolumn{1}{c}{x} \\ \hline
+			\rowcolor[HTML]{EFEFEF} 
+			ALL & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} \\ \hline
+		\end{tabular}
+		\caption{Identifiers and applied methods for the different experimental setups.}
+		\label{table:grid}
+	\end{table}
 	
+
 	\subsection{Datasets}
 	
 	\placeholder{%
 		MNIST: simple baseline, reproducibility check against BLADES published numbers;
 		image size, number of classes, train/test split.
 		CIFAR-10: scalability test; used in the position paper's empirical evidence
-		table~\cite{allouah2023position};
+		table~\cite{allouah2023balancing};
 		image size, number of classes, train/test split.
 		Data partitioning strategy across clients (IID / Dirichlet non-IID).%
 	}
@@ -449,7 +487,7 @@
 		Main results table: 8 configurations $\times$ all metrics;
 		additive vs.\ super-additive cost analysis;
 		focus on DP+FLTrust interaction;
-		radar / simplex visualisation (Figure~\placeholder{X}).%
+		radar / simplex visualization (Figure~\placeholder{X}).%
 	}
 	
 	\subsubsection{DP + Robustness}
@@ -480,7 +518,7 @@
 	
 	\placeholder{%
 		Relate empirical findings to the theoretical cross-term $\eta/\epsilon^2$;
-		characterise compounding as additive / sub-additive / super-additive per
+		characterize compounding as additive / sub-additive / super-additive per
 		configuration pair; intuition for why DP clipping and FLTrust cosine clipping
 		interact destructively.%
 	}
@@ -489,7 +527,7 @@
 	
 	\placeholder{%
 		Heuristic: jointly set DP clipping norm $C$ and FLTrust trust threshold to
-		minimise redundant gradient suppression;
+		minimize redundant gradient suppression;
 		description of the calibration procedure;
 		results vs.\ uncalibrated worst-case combination;
 		formal guarantee preservation argument.%
@@ -498,7 +536,7 @@
 	\subsection{Practical Recommendations}
 	
 	\placeholder{%
-		When to prioritise which axis;
+		When to prioritize which axis;
 		safe operating region in the trilemma space;
 		guidance on $(\epsilon,k)$ parameter selection given a robustness requirement.%
 	}
@@ -521,7 +559,7 @@
 	\placeholder{%
 		Extend to Krum, SMEA, CAF aggregators;
 		stronger attacks (model poisoning~\cite{fang2020poisoning});
-		LoRA+DP reparametrisation~\cite{liu2025lorfl} for the efficiency axis;
+		LoRA+DP reparametrization~\cite{liu2025dplora} for the efficiency axis;
 		theoretical tightness of joint calibration heuristic.%
 	}
 	
