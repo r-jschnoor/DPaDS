@@ -25,10 +25,10 @@ warnings.filterwarnings("ignore", message="DEPRECATED")
 
 
 # Globals
-NUM_CLIENTS = 5
-NUM_ROUNDS = 3
+NUM_CLIENTS = 16
+NUM_ROUNDS = 20
 USE_DP = True
-EPSILON = 1.0
+EPSILON = 10.0
 
 
 def get_client_fn(train_dataset, test_dataset, num_clients, use_dp=False, epsilon=10.0):
