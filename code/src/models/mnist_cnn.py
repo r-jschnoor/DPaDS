@@ -6,7 +6,7 @@ class MnistCNN(nn.Module):
 
     def __init__(self):
         super().__init__()
-
+        # ----- First Layering -----
         # One convolutional layer
         self.conv1 = nn.Conv2d(
             in_channels=1,      # greyscale = 1 channel (RGB would be 3)
@@ -22,13 +22,44 @@ class MnistCNN(nn.Module):
         self.pool1 = nn.MaxPool2d(
             kernel_size=2       # Effectively halves the input size. It slides a 2x2 window across the image with no overlap and keeps only the maximum value in each window. -> Strongest signal in that region
         )
+        
+        # ----- Second Layering -----
+        self.conv2 = nn.Conv2d(
+            in_channels=16,     # Same as out in layer before
+            out_channels=32,    # Doubling as explained before
+            kernel_size=3,      # Same as before
+            padding=1,          # Same as before
+        )
+        self.relu2 = nn.ReLU()
+        self.pool2 = nn.MaxPool2d(kernel_size=2)    # Same as before to shrink even further
 
+        # ----- Flattening Layering -----
+        # Now turn the tensor into class scores -> One number per digit (in the output guess).
+        # Currently we have a 3D block -> Need to flatten to 1D Vector with size 32*7*7 = 1568
+        # A Linear Layer connects every input to every output. Hence fully connected.
+        # A Convolutional Layer looks over the tensor in patches, meaning its only locally connected.
+        self.flatten = nn.Flatten()
+        self.fc1 = nn.Linear(32 * 7 * 7, 64)    # fc = fully connected, 64 => choosable parameter for the output channels. 64 seems to be normal for MNIST
+        self.relu3 = nn.ReLU()
+        self.fc2 = nn.Linear(64, 10)            # 10 -> One score per digit
+
+
+        # ReLU and MaxPool could be reused since the parameters are the same. I am not doing it here for now for learning purposes.
 
     def forward(self, x):
         # Forward data through layers
         x = self.conv1(x)       # (4, 1,  28, 28) -> (4, 16, 28, 28)
         x = self.relu1(x)       # same shape, just kills negative values
         x = self.pool1(x)       # (4, 16, 28, 28) -> (4, 16, 14, 14)
+
+        x = self.conv2(x)       # (4, 16, 14, 14) -> (4, 32, 14, 14)
+        x = self.relu2(x)
+        x = self.pool2(x)       # (4, 32, 14, 14) -> (4, 32,  7,  7)
+
+        x = self.flatten(x)     # -> (4, 1568)
+        x = self.fc1(x)         # -> (4, 64)
+        x = self.relu3(x)
+        x = self.fc2(x)         # -> (4, 10)
         return x
 
 
