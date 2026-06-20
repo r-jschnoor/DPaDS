@@ -9,6 +9,7 @@
 \usepackage{booktabs}
 \usepackage{amsmath, amsthm}
 \newtheorem{theorem}{Theorem}
+\newtheorem{definition}{Definition}
 \usepackage{amssymb}
 \usepackage{enumitem}
 \usepackage{xcolor}
@@ -18,6 +19,7 @@
 \usepackage{pgfplots}
 \usepackage[table,xcdraw]{xcolor}
 \pgfplotsset{compat=1.18}
+\usepackage[printonlyused]{acronym}
 
 % --------------------------------------------------
 % Placeholder command
@@ -45,12 +47,21 @@
 	
 	\tableofcontents
 	
+	\section*{List of abbreviations}
+	\begin{acronym}
+		\acro{FL}{Federated Learning}
+		\acro{IID}{independent and identically distributed}
+		\acro{DP-SGD}{Differentially Private Stochastic Gradient Descent}
+		\acro{SGD}{Stochastic Gradient Descend}
+		\acro{DP}{Differential Privacy}
+	\end{acronym}
+	
 	% --------------------------------------------------
 	\section{Introduction}
 	% --------------------------------------------------
 	
 	We present a systematic empirical study of the Privacy--Robustness--Performance
-	trilemma in Federated Learning (FL), examining how simultaneously deployed defenses
+	trilemma in \ac{FL}, examining how simultaneously deployed defenses
 	interact and compound across all three axes.
 	
 	\placeholder{%
@@ -64,7 +75,7 @@
 		why protection is non-trivial; cite~\cite{mcmahan2017fedavg,abadi2016deep}.%
 	}
 	
-	In the past ten years, federated learning has emerged as a framework for achieving distributed training without the need for data centralization. This is of particular interest when processing sensitive data, such as in healthcare or mobile applications. The local training allows to leave the data with the clients but opens new attack surfaces for model poisoning during training through the transmission of manipulated updates. Also, the transmitted gradients can still leak information about the used training data set. Additionally, gradient transmission at each round causes significant communication cost, especially for complex models.
+	In the past ten years, \ac{FL} has emerged as a framework for achieving distributed training without the need for data centralization. This is of particular interest when processing sensitive data, such as in healthcare or mobile applications. The local training allows to leave the data with the clients but opens new attack surfaces for model poisoning during training through the transmission of manipulated updates. Also, the transmitted gradients can still leak information about the used training data set. Additionally, gradient transmission at each round causes significant communication cost, especially for complex models.
 	
 	In an effort to fortify the resilience of models and safeguard client privacy, numerous methodologies have been implemented in recent years. Robustness-enhancing methods are designed to detect malicious updates by assuming a significant deviation from the honest majority. Privacy-preserving algorithms add a mask or calibrated noise to the local updates before transmitting them to the central server.
 	
@@ -79,12 +90,12 @@
 	
 	Ensuring model robustness and client privacy while balancing communication cost and model accuracy has been identified as a significant challenge.
 	Adding privacy-enhancing noise to individual updates reduces a malicious server's ability to extract information about local datasets, while simultaneously reducing model accuracy.
-	Discarding unusual updates improves robustness against Byzantine adversaries but risks disregarding legitimate updates, particularly in non-IID settings.
+	Discarding unusual updates improves robustness against Byzantine adversaries but risks disregarding legitimate updates, particularly in settings where data is not \ac{IID}.
 	Compression techniques that reduce transmission load limit the information transmitted to the server and thus reduce model accuracy.
 	
 	In 2023, Allouah et al.~\cite{allouah2023trilemma} proved Theorem \ref{theorem:lowerBound}, stating that the combination of such methods yields a lower bound for the expected training error that exceeds the sum of the individual cost for robustness and privacy by a multiplicative term.
 	\begin{theorem}
-		Consider distributed mean estimation in $\mathbb{R}^d$ with $n$ users, of which an $\eta$-fraction may behave maliciously. Any algorithm, producing an estimate $\hat{\mu}$ of the true mean $\mu\in\mathbb{R}^d$ of inputs, and achieving $(\varepsilon-\delta)$-local DP and robustness to $\eta$-corruption must incur an estimated error
+		Consider distributed mean estimation in $\mathbb{R}^d$ with $n$ users, of which an $\eta$-fraction may behave maliciously. Any algorithm, producing an estimate $\hat{\mu}$ of the true mean $\mu\in\mathbb{R}^d$ of inputs, and achieving $(\varepsilon,\delta)$-local \ac{DP} and robustness to $\eta$-corruption must incur an estimated error
 		\begin{equation}
 			\mathbb{E}\parallel \hat{\mu}-\mu\parallel _{2}^{2} = \tilde{\Omega}(\frac{\eta}{\varepsilon^{2}}+\frac{d}{\varepsilon^{2}n}+\eta G^{2}).
 		\end{equation}
@@ -99,14 +110,14 @@
 	The project is structured around three research questions:
 	\begin{enumerate}
 		\item \textbf{Isolation:} What is the individual cost of each defense mechanism
-		(DP, Byzantine-robust aggregation, gradient compression) in terms of accuracy,
+		(\ac{DP}, Byzantine-robust aggregation, gradient compression) in terms of accuracy,
 		communication overhead, and attack success rate, and do our results reproduce
 		the published baselines?
 		\item \textbf{Combination:} How do pairwise and full combinations of the three
 		mechanisms interact? Do the costs compound additively, sub-additively, or
 		super-additively?
 		\item \textbf{Mitigation:} Can simple adjustments --- e.g.\ joint calibration of
-		the DP clipping norm and the robust aggregation threshold --- reduce the
+		the \ac{DP} clipping norm and the robust aggregation threshold --- reduce the
 		compounding effect without sacrificing formal guarantees?
 	\end{enumerate}
 	
@@ -150,13 +161,12 @@
 	
 	Federated Learning is a machine learning framework comprising a central server and multiple distributed clients. Each client maintains a
 	local dataset to compute updates for the global model. The central server orchestrates the training process by distributing the current
-	global model, collecting client updates, and aggregating them to produce a new global model update. This update is then distributed to
-	clients to initiate the next training round. 
+	global model, collecting client updates, and aggregating them to produce a new global model update. This update is then distributed to clients to initiate the next training round. 
 	
 	The most widely used aggregation method is FedAvg~\cite{mcmahan2017fedavg}, which computes
 	the global update as a weighted average of the client-local model updates.
 	
-	\subsection{Privacy: Differential Privacy}
+	\subsection{Privacy: \ac{DP}}
 	
 	\subsubsection{Definition and Composition}
 	
@@ -165,7 +175,21 @@
 		composition theorems; Rényi DP~\cite{Mironov_2017} for tighter accounting.%
 	}
 	
-	\subsubsection{DP-SGD}
+	\ac{DP} forms a good standard for privacy guarantees for algorithms used in data aggregation. Its degree of protection is defined by the privacy budget $\varepsilon$ and the failure probability $\delta$. We use the definition given by Abadi et al.~\cite{abadi2016deep}.
+	
+\begin{definition}
+	A randomized mechanism $M\colon D\rightarrow R$ with domain $D$ and range $R$ 
+	satisfies $(\varepsilon,\delta)$-differential privacy if for any two adjacent inputs $d,d'\in D$ and for any subset of outputs $S\subseteq R$ it holds that
+	\[
+	\Pr[M(D)\in S]\leq e^{\varepsilon}\Pr[M(D')\in S]+\delta.
+	\]
+\end{definition}
+
+	The privacy budget $\varepsilon$ denotes the trade-off between utility and privacy, bounding the tolerated noise addition. Small values ($\varepsilon < 1$) provide the strongest privacy guarantees while larger values ($\varepsilon >8$) allow for more accurate training.
+	
+	The failure probability $\delta$, introduced by Dwork et al.~\cite{privacy_delta}, denotes the probability that the plain $\varepsilon$-\ac{DP} is broken and should be chosen smaller than the inverse size of the local dataset.
+	
+	\subsubsection{\ac{DP-SGD}}
 	
 	\placeholder{%
 		Per-sample gradient clipping to bound $\ell_2$-sensitivity;
@@ -173,7 +197,15 @@
 		Opacus accountant~\cite{yousefpour2021opacus}.%
 	}
 	
-	\subsubsection{Central vs.\ Local DP in FL}
+	\ac{DP-SGD} is a modification to the standard \ac{SGD} algorithm introduced by Abadi et al.~\cite{abadi2016deep} in 2016 to integrate \ac{DP} into deep learning frameworks. It enhances \ac{SGD} by clipping the computed gradient to a fixed norm and adding calibrated (Gaussian) noise before performing an update step. The algorithm pseudocode as proposed by Abadi et al. is shown in figure \ref{fig:dpsgdpseudocode}.
+	
+	\begin{figure}
+		\includegraphics[width=\linewidth]{img/DP_SGD_pseudocode}
+		\caption{\ac{DP-SGD} pseudocode as published by Abadi et al.~\cite{abadi2016deep}.}
+		\label{fig:dpsgdpseudocode}
+	\end{figure}
+	
+	\subsubsection{Central vs.\ Local \ac{DP} in FL}
 	
 	\placeholder{%
 		Central DP: noise at server post-aggregation.
@@ -181,9 +213,9 @@
 		Trade-offs in trust model and effective noise magnitude.%
 	}
 	
-	Central DP is applied by the server by adding noise after the aggregation. //TODO Threat model and applications
+	Central \ac{DP} is applied by the server by adding noise after the aggregation. //TODO Threat model and applications
 	
-	In our case, the local updates are to be protected from inference attacks, requiring local DP. This is achieved by each client adding the noise locally before sharing the updates. The effective noise magnitude increases in this case //TODO numbers, reference!!
+	In our case, the local updates are to be protected from inference attacks, requiring local \ac{DP}. This is achieved by each client adding the noise locally before sharing the updates. The effective noise magnitude increases in this case //TODO numbers, reference!!
 	
 	\subsection{Robustness: Byzantine-Tolerant Aggregation}
 	
@@ -251,7 +283,7 @@
 	}
 	
 	Allouah et al.~\cite{allouah2023trilemma} showed that any algorithm guaranteeing
-	$\epsilon$-local DP and robustness against an $\eta$-fraction Byzantine adversary incurs a mean-estimation error of at least
+	$\epsilon$-local \ac{DP} and robustness against an $\eta$-fraction Byzantine adversary incurs a mean-estimation error of at least
 	$\Omega\!\left(\frac{\eta}{\epsilon^2} + \frac{d}{\epsilon^2 n} + \eta G^2\right)$.
 	
 	The cross-term $\eta/\epsilon^2$ shows that the cost for privacy and robustness interact multiplicative instead of additive.
@@ -285,7 +317,7 @@
 		no collusion between Byzantine clients and passive server.%
 	}
 	
-	We assume an honest-but-curious central server that adheres to protocol specifications but may attempt to infer private information from transmitted updates, motivating the use of differential privacy (DP) to safeguard client data. The adversary is characterized by a fraction $\eta$ of malicious clients, capable of arbitrarily manipulating gradients (e.g., through label-flipping attacks, as formalized in Fang et al.~\cite{fang2020poisoning}). These clients aim to corrupt the global model by injecting adversarial updates. Crucially, we assume no collusion between Byzantine clients and the server, restricting adversarial behavior to local manipulations of gradients. This assumption simplifies the analysis while maintaining practical relevance for decentralized learning systems.
+	We assume an honest-but-curious central server that adheres to protocol specifications but may attempt to infer private information from transmitted updates, motivating the use of \ac{DP} to safeguard client data. The adversary is characterized by a fraction $\eta$ of malicious clients, capable of arbitrarily manipulating gradients (e.g., through label-flipping attacks, as formalized in Fang et al.~\cite{fang2020poisoning}). These clients aim to corrupt the global model by injecting adversarial updates. Crucially, we assume no collusion between Byzantine clients and the server, restricting adversarial behavior to local manipulations of gradients. This assumption simplifies the analysis while maintaining practical relevance for decentralized learning systems.
 	
 	\subsection{Evaluation Metrics}
 	\label{sec:metrics}
@@ -298,7 +330,7 @@
 		membership inference attack success rate (shadow model baseline).%
 	}
 	
-	The privacy objective is quantified by the accumulated $(\epsilon,\delta)$-differential privacy (DP) budget after $T$ rounds, tracked using the Rényi accountant~\cite{mironov2019rényi}. Additionally, the vulnerability to membership inference attacks is assessed by measuring the success rate of such attacks against a shadow model baseline~\cite{song2019membership}.
+	The privacy objective is quantified by the accumulated $(\epsilon,\delta)$-\ac{DP} budget after $T$ rounds, tracked using the Rényi accountant~\cite{mironov2019rényi}. Additionally, the vulnerability to membership inference attacks is assessed by measuring the success rate of such attacks against a shadow model baseline~\cite{song2019membership}.
 	
 	\paragraph{Robustness.}
 	\placeholder{%
@@ -329,7 +361,7 @@
 	\section{Methods}
 	\label{sec:method}
 	% --------------------------------------------------
-	
+	This section briefly describes and justifies the selected methods for each axis.
 	\subsection{Baseline: FedAvg}
 	
 	\placeholder{%
@@ -338,7 +370,9 @@
 		no privacy, robustness, or compression applied.%
 	}
 	
-	\subsection{Privacy Mechanism: DP-SGD}
+	FedAvg, introduced by McMahan et al. in 2017~\cite{mcmahan2017fedavg}, is a widely used aggregation strategy in \ac{FL} designed to handle non-\ac{IID} data efficiently. It computes a weighted average of local model updates, with weights determined by the size of each client’s local dataset. The paper establishes baselines on standard datasets such as MNIST and CIFAR-10, making FedAvg a foundational reference for evaluating \ac{FL} methods. Its simplicity and effectiveness in early \ac{FL} research have cemented its role as a standard baseline for comparative studies.
+	
+	\subsection{Privacy Mechanism: \ac{DP-SGD}}
 	
 	\placeholder{%
 		Per-sample clipping norm $C$; noise multiplier $\sigma$; privacy budget
@@ -354,6 +388,16 @@
 		implementation via BLADES~\cite{li2024blades}.%
 	}
 	
+	The root dataset for the central server was obtained by randomly sampling XX datapoints from WHERE?
+	
+	The trust score for weighting the local contributions is calculated as the cosine similarity to the update vector that was computed from the root data set as depicted in figure \ref{fig:fltrustupdate}.
+	\begin{figure*}[h!]
+		\centering
+		\includegraphics[width=\textwidth]{img/fltrust_update}
+		\caption{Global aggregation rule for FLTrust as introduced by Cao et al.~\cite{cao2021fltrust}.}
+		\label{fig:fltrustupdate}
+	\end{figure*}
+	
 	\subsection{Performance Mechanism: Top-$k$ Sparsification}
 	
 	\placeholder{%
@@ -362,6 +406,7 @@
 		custom Flower strategy wrapper;
 		interaction with gradient clipping discussed in Section~\ref{sec:interaction}.%
 	}
+	
 	
 	\subsection{Mechanism Interaction Effects}
 	\label{sec:interaction}
@@ -386,7 +431,7 @@
 		\begin{tabular}{llll}
 			\hline
 			\rowcolor[HTML]{C0C0C0} 
-			\textbf{Identifier} & DP-SGD & FLTrust & Top-k \\ \hline
+			\textbf{Identifier} & \ac{DP-SGD} & FLTrust & Top-k \\ \hline
 			Base &  &  &  \\ \hline
 			\rowcolor[HTML]{EFEFEF} 
 			DP & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} &  &  \\ \hline
@@ -429,9 +474,9 @@
 	\subsection{Software Stack}
 	
 	\begin{itemize}
-		\item \textbf{Flower} (flwr)~\cite{beutel2020flower} --- FL orchestration,
+		\item \textbf{Flower} (flwr)~\cite{beutel2020flower} --- \ac{FL} orchestration,
 		client/server simulation, strategy interface.
-		\item \textbf{Opacus}~\cite{yousefpour2021opacus} --- DP-SGD, Rényi DP
+		\item \textbf{Opacus}~\cite{yousefpour2021opacus} --- \ac{DP-SGD}, Rényi \ac{DP}
 		accounting, gradient clipping.
 		\item \textbf{FLTrust}~\cite{cao2021fltrust} --- FLTrust defense implementation.
 		\item \textbf{BLADES}~\cite{li2024blades} --- Byzantine attack implementations; PyTorch/Ray backend compatible with Flower.
@@ -472,7 +517,7 @@
 		results on both MNIST and CIFAR-10.%
 	}
 	
-	\subsubsection{DP-SGD Cost}
+	\subsubsection{\ac{DP-SGD} Cost}
 	\placeholder{Accuracy curves for $\epsilon \in \{1,5,10\}$; privacy budget consumed.}
 	
 	\subsubsection{FLTrust Cost}
@@ -486,20 +531,20 @@
 	\placeholder{%
 		Main results table: 8 configurations $\times$ all metrics;
 		additive vs.\ super-additive cost analysis;
-		focus on DP+FLTrust interaction;
+		focus on \ac{DP}+FLTrust interaction;
 		radar / simplex visualization (Figure~\placeholder{X}).%
 	}
 	
-	\subsubsection{DP + Robustness}
+	\subsubsection{\ac{DP} + Robustness}
 	\placeholder{Effect on accuracy and ASR; comparison to individual costs.}
 	
-	\subsubsection{DP + Compression}
+	\subsubsection{\ac{DP} + Compression}
 	\placeholder{Effect on accuracy and communication cost; interaction with noise.}
 	
 	\subsubsection{Robustness + Compression}
 	\placeholder{Effect on ASR and bytes per round.}
 	
-	\subsubsection{Full Combination (DP + Robustness + Compression)}
+	\subsubsection{Full Combination (\ac{DP} + Robustness + Compression)}
 	\placeholder{Worst-case configuration; super-additive compounding quantified.}
 	
 	\subsection{MNIST vs.\ CIFAR-10 Comparison}
@@ -554,6 +599,10 @@
 		limited $\epsilon$ grid; MNIST/CIFAR-10 may not represent medical/financial FL.%
 	}
 	
+	The experiments in this project were conducted under several simplifications to provide a lightweight anchor for future research. The datasets and models selected offer good comparability with existing work but may not fully represent the data analyzed in practical \ac{FL} applications (e.g., financial or medical domains) or complex architectures (e.g., transformer-like models). 
+	
+	Furthermore, we evaluated only a single method at most one attack type per axis. The baseline for membership inference attack success rate was approximated using a shadow model, and the privacy budget was constrained to a limited $\varepsilon$-grid to balance computational feasibility with analytical rigor. Additionally, the privacy budget was spent uniformly over time, but recent research by Kiani et al.~\cite{kiani2025differentiallyprivatefederatedlearning} suggests that a time-adaptive approach yields better privacy-utility-tradeoffs.
+	
 	\subsection{Future Work}
 	
 	\placeholder{%
@@ -562,6 +611,10 @@
 		LoRA+DP reparametrization~\cite{liu2025dplora} for the efficiency axis;
 		theoretical tightness of joint calibration heuristic.%
 	}
+	
+	Future work should aim to expand the experimental setup to encompass a broader range of methods (e.g., Krum, SMEA, CAF for aggregation) and evaluate stronger adversarial scenarios, such as model poisoning attacks described by Fang et al.\cite{fang2020poisoning}. Additionally, exploring reparametrization techniques such as the Low-Rank-adaptation method proposed by Liu et al.\cite{liu2025dplora} could provide insights into balancing efficiency and privacy in \ac{FL} systems. 
+	
+	Other promising directions include varying the Byzantine fraction, testing alternative threat models (e.g., malicious servers, collusion between malicious clients and servers), or introducing data heterogeneity through artificially distributed datasets. These extensions would better reflect real-world complexities and enable more robust comparisons across methodologies..
 	
 	% --------------------------------------------------
 	\section{Conclusion}
