@@ -1,0 +1,81 @@
+{
+  "config": {
+    "config_id": 2,
+    "num_clients": 5,
+    "num_rounds": 10,
+    "num_byzantine": 1,
+    "use_dp": true,
+    "epsilon": 10.0,
+    "delta": 1e-05,
+    "use_fltrust": false,
+    "use_topk": false,
+    "topk_ratio": 0.1,
+    "root_dataset_size": 2000,
+    "rescale_to_ref_norm": false
+  },
+  "results": {
+    "elapsed_seconds": 223.39633655548096,
+    "per_round": [
+      {
+        "round": 1,
+        "loss": 1.9479227980104878,
+        "accuracy": 0.5604,
+        "epsilon": null
+      },
+      {
+        "round": 2,
+        "loss": 1.4678107766678539,
+        "accuracy": 0.7956,
+        "epsilon": null
+      },
+      {
+        "round": 3,
+        "loss": 1.4998848759613859,
+        "accuracy": 0.8248,
+        "epsilon": null
+      },
+      {
+        "round": 4,
+        "loss": 1.4165039168664824,
+        "accuracy": 0.8483,
+        "epsilon": null
+      },
+      {
+        "round": 5,
+        "loss": 1.393190284339955,
+        "accuracy": 0.8547,
+        "epsilon": null
+      },
+      {
+        "round": 6,
+        "loss": 1.5049297286393923,
+        "accuracy": 0.8559,
+        "epsilon": null
+      },
+      {
+        "round": 7,
+        "loss": 1.5935058609222452,
+        "accuracy": 0.8607,
+        "epsilon": null
+      },
+      {
+        "round": 8,
+        "loss": 1.5571721623809383,
+        "accuracy": 0.8656,
+        "epsilon": null
+      },
+      {
+        "round": 9,
+        "loss": 1.6344972701546865,
+        "accuracy": 0.8674,
+        "epsilon": null
+      },
+      {
+        "round": 10,
+        "loss": 1.6241506290452454,
+        "accuracy": 0.8686,
+        "epsilon": null
+      }
+    ]
+  }
+}

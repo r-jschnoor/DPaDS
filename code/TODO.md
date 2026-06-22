@@ -1,0 +1,5 @@
+- Revisit trust scores
+- Refactor redundancy
+- Implement CIFAR-10
+- BLADES validation
+- Talk about Epsilon Accumulation. Currently it simulates epsilon but this should be fine since epsilon accumulates roughly linearly and opacus handles it correctly anyway. The problem is that there are no persistent states in the clients (which is right). -> could somehow pass epsilon between server client but is high in implementation cost and introduces network overhead

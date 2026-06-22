@@ -1,8 +1,8 @@
-import os
-import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+import numpy as np
 
-from client import MnistClient
+from src.client import MnistClient
+from src.mechanisms.dp import get_privacy_spent
+from src.mechanisms.topk import topk_sparsify
 
 
 class LabelFlipClient(MnistClient):
@@ -23,11 +23,14 @@ class LabelFlipClient(MnistClient):
         target_label (int):    the digit to relabel it as (e.g. 1).
         use_dp (bool):         whether to wrap training with DP-SGD.
         epsilon (float):       privacy budget. Only used when use_dp=True.
+        num_rounds (int):      number of training rounds (each with 1 epoch) planned.
     """
 
     def __init__(self, client_id, train_loader, test_loader,
-                 source_label=7, target_label=1, use_dp=False, epsilon=10.0):
-        super().__init__(client_id, train_loader, test_loader, use_dp, epsilon)
+                 source_label=7, target_label=1, use_dp=False, epsilon=10.0,
+                 use_topk=False, topk_ratio=0.1, num_rounds=1):
+        super().__init__(client_id, train_loader, test_loader, use_dp, epsilon,
+                         use_topk=use_topk, topk_ratio=topk_ratio, num_rounds=num_rounds)
         self.source_label = source_label
         self.target_label = target_label
 
@@ -56,4 +59,26 @@ class LabelFlipClient(MnistClient):
             loss.backward()
             self.optimizer.step()
 
-        return self.get_parameters(config={}), len(self.train_loader.dataset), {}
+        metrics = {}
+        if self.use_dp and self.privacy_engine is not None:
+            epsilon = get_privacy_spent(self.privacy_engine, self.delta)
+            metrics["epsilon"] = epsilon
+        
+        updated_parameters = self.get_parameters(config={})
+
+        if self.use_topk:
+            flat_before = np.concatenate([p.flatten() for p in parameters])
+            flat_after = np.concatenate([p.flatten() for p in updated_parameters])
+            update = flat_after - flat_before
+            sparse_update = topk_sparsify(update, self.topk_ratio)
+            sparse_params = flat_before + sparse_update
+            shapes = [p.shape for p in updated_parameters]
+            updated_parameters = []
+            index = 0
+            for shape in shapes:
+                size = int(np.prod(shape))
+                updated_parameters.append(sparse_params[index:index+size].reshape(shape))
+                index += size
+            metrics["topk_sparsity"] = np.count_nonzero(sparse_update) / len(sparse_update)
+
+        return self.get_parameters(config={}), len(self.train_loader.dataset), metrics

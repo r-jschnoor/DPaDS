@@ -1,10 +1,12 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import flwr as fl
 import warnings
 
-from models.mnist_cnn import MnistCNN
-from mechanisms.dp import make_private, get_privacy_spent
+from src.mechanisms.topk import topk_sparsify
+from src.models.mnist_cnn import MnistCNN
+from src.mechanisms.dp import make_private, get_privacy_spent
 
 warnings.filterwarnings("ignore", message="Secure RNG turned off")
 warnings.filterwarnings("ignore", message="Optimal order is the largest alpha")
@@ -15,7 +17,8 @@ class MnistClient(fl.client.NumPyClient):
     """Flower client wrapping our MNIST training loop."""
 
     def __init__(self, client_id, train_loader, test_loader,
-                 use_dp=False, epsilon=10.0, delta=1e-5):
+                 use_dp=False, epsilon=10.0, delta=1e-5,
+                 use_topk=False, topk_ratio=0.1, num_rounds=1):
         self.client_id = client_id
         self.train_loader = train_loader
         self.test_loader = test_loader
@@ -26,6 +29,8 @@ class MnistClient(fl.client.NumPyClient):
         self.epsilon = epsilon
         self.delta = delta
         self.privacy_engine = None
+        self.use_topk = use_topk
+        self.topk_ratio = topk_ratio
 
         if use_dp and train_loader is not None:
             self.model, self.optimizer, self.train_loader, self.privacy_engine = make_private(
@@ -35,7 +40,7 @@ class MnistClient(fl.client.NumPyClient):
                 target_epsilon=epsilon,
                 target_delta=delta,
                 max_grad_norm=1.0,
-                epochs=1,
+                num_rounds=num_rounds,
             )
 
     
@@ -121,9 +126,33 @@ class MnistClient(fl.client.NumPyClient):
         if self.use_dp and self.privacy_engine is not None:
             epsilon = get_privacy_spent(self.privacy_engine, self.delta)
             metrics["epsilon"] = epsilon
-            print(f"     Client {self.client_id} | epsilon = {epsilon:.4f}")
+            print(f"  [LOG DP] Client {self.client_id} | epsilon = {epsilon:.4f}")
 
-        return self.get_parameters(config={}), len(self.train_loader.dataset), metrics
+        updated_parameters = self.get_parameters(config={})
+
+        if self.use_topk:
+            # Compute update -> weights now - global weights
+            flat_before = np.concatenate([p.flatten() for p in parameters])         # Global model weights before training
+            flat_after = np.concatenate([p.flatten() for p in updated_parameters])  # Local model weights after training
+            update = flat_after - flat_before                                       # How muhc did the weights change?
+
+            sparsified_update = topk_sparsify(update, self.topk_ratio)              # Zero out everything except top-k values
+
+            # Reconstruct parameter list
+            sparse_parameters = flat_before + sparsified_update                     # Applys update to origin vector (zeroed out values provide + 0.0 -> no update at all)
+            shapes = [p.shape for p in updated_parameters]
+            updated_parameters = []
+            index = 0
+            # TODO extract this restoring of original shape into helper method
+            for shape in shapes:
+                size = int(np.prod(shape))
+                updated_parameters.append(sparse_parameters[index:index+size].reshape(shape))
+                index += size
+            
+            sparsity = np.count_nonzero(sparsified_update) / len(sparsified_update)
+            metrics["topk_sparsity"] = sparsity
+
+        return updated_parameters, len(self.train_loader.dataset), metrics
     
 
     def evaluate(self, parameters, config):

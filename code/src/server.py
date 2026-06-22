@@ -9,9 +9,10 @@ import os
 import warnings
 import logging
 
-from client import MnistClient
-from mechanisms.attacks import LabelFlipClient
-from mechanisms.robust_aggregation import FLTrustStrategy
+from src.client import MnistClient
+from src.experiment_config import ExperimentConfig
+from src.mechanisms.attacks import LabelFlipClient
+from src.mechanisms.robust_aggregation import FLTrustStrategy
 
 
 # Env
@@ -27,6 +28,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 # TODO Check if trust scores work. Label flipping trust is similar to no flipping trust!
+# TODO These globals are overriden in the experiment runs -> Remove or relocate!
 
 # Globals (Config)
 NUM_CLIENTS                 = 5
@@ -37,6 +39,51 @@ EPSILON                     = 10.0
 USE_FLTRUST                 = True
 ROOT_DATASET_SIZE           = 2000   # Sample count the server holds
 USE_RESCALE_TO_REF_NORM     = False  # Whether the server should normalize the clients gradients. Paper uses it but the available resources are not enough to mirror so its turned off for now. This is mostly to protect against malicious clients that send massive updates to gain an advantage to honest clients by size.
+USE_TOPK                    = True
+TOPK_RATIO                  = 0.1
+
+
+class HistoryStrategyAdapter:
+    """
+    Adds per-round metric tracking to any Flower strategy.
+    
+    Add this as the first parent class to any strategy to enable tracking.
+    The history dict is populated in-place during the simulation.
+
+    Args:
+        history (dict): shared dict to store per-round results.
+    """
+
+    def __init__(self, history, **kwargs):
+        super().__init__(**kwargs)
+        self.history = history
+
+    def aggregate_evaluate(self, server_round, results, failures):
+        loss, metrics = super().aggregate_evaluate(server_round, results, failures)
+        if loss is not None:
+            self.history["losses_distributed"].append((server_round, loss))
+        if metrics:
+            for key, val in metrics.items():
+                self.history["metrics_distributed_evaluate"].setdefault(key, [])
+                self.history["metrics_distributed_evaluate"][key].append((server_round, val))
+        return loss, metrics
+
+    def aggregate_fit(self, server_round, results, failures):
+        params, metrics = super().aggregate_fit(server_round, results, failures)
+        if metrics:
+            for key, val in metrics.items():
+                self.history["metrics_distributed_fit"].setdefault(key, [])
+                self.history["metrics_distributed_fit"][key].append((server_round, val))
+        return params, metrics
+
+
+class TrackingFedAvg(HistoryStrategyAdapter, FedAvg):
+    """FedAvg with per-round history tracking."""
+    pass
+
+class TrackingFLTrust(HistoryStrategyAdapter, FLTrustStrategy):
+    """FLTrust with per-round history tracking."""
+    pass
 
 
 def load_datasets(root_dataset_size):
@@ -62,7 +109,8 @@ def load_datasets(root_dataset_size):
 
 
 def get_client_fn(train_dataset, test_dataset, num_clients,
-                  num_byzantine=0, use_dp=False, epsilon=10.0):
+                  num_byzantine=0, use_dp=False, epsilon=10.0,
+                  use_topk=False, topk_ratio=0.1, num_rounds=1):
     """
     Returns a function that creates a client with it own data slice.
 
@@ -80,6 +128,9 @@ def get_client_fn(train_dataset, test_dataset, num_clients,
         num_byzantine (int):     how many clients are malicious.
         use_dp (bool):           whether to wrap training with DP-SGD.
         epsilon (float):         privacy budget. Only used when use_dp=True.
+        use_topk (bool):         whether to use top-k algorithm or not.
+        topk_ratio (float):      the ratio of kept top-k values.
+        num_rounds (int):        number of training rounds (each with 1 epoch) planned
 
     Returns:
         function: client_fn(context) -> flwr.client.Client
@@ -116,11 +167,16 @@ def get_client_fn(train_dataset, test_dataset, num_clients,
             return LabelFlipClient(
                 client_id, train_loader, test_loader,
                 source_label=7, target_label=1,
+                use_dp=use_dp, epsilon=epsilon,
+                use_topk=use_topk, topk_ratio=topk_ratio,
+                num_rounds=num_rounds,
             ).to_client()
         
         return MnistClient(
             client_id, train_loader, test_loader,
-            use_dp=use_dp, epsilon=epsilon
+            use_dp=use_dp, epsilon=epsilon,
+            use_topk=use_topk, topk_ratio=topk_ratio,
+            num_rounds=num_rounds,
         ).to_client()
     
     return client_fn
@@ -196,6 +252,75 @@ def weighted_average_metrics(metrics):
     return aggregated
 
 
+def run_simulation_with_config(config: ExperimentConfig):
+    """
+    Run one FL simulation with the given experiment config.
+
+    Args:
+        config (ExperimentConfig): experiment configuration.
+
+    Returns:
+        flwr History object containing per-round metrics.
+    """
+    train_dataset, test_dataset, root_loader = load_datasets(config.root_dataset_size)
+
+    # Track history
+    run_history = {
+        "losses_distributed": [],
+        "metrics_distributed_evaluate": {},
+        "metrics_distributed_fit": {},
+    }
+
+    # Strategies with tracking
+    if config.use_fltrust:
+        strategy = TrackingFLTrust(
+            history=run_history,
+            root_loader=root_loader,
+            rescale_to_ref_norm=config.rescale_to_ref_norm,
+            fraction_fit=1.0,
+            min_available_clients=config.num_clients,
+            fit_metrics_aggregation_fn=weighted_average_metrics,
+            evaluate_metrics_aggregation_fn=weighted_average_metrics,
+        )
+    else:
+        strategy = TrackingFedAvg(
+            history=run_history,
+            fraction_fit=1.0,
+            min_available_clients=config.num_clients,
+            fit_metrics_aggregation_fn=weighted_average_metrics,
+            evaluate_metrics_aggregation_fn=weighted_average_metrics,
+        )
+
+    # server_fn that uses custom tracking strategy
+    def server_fn(context):
+        return ServerAppComponents(
+            strategy=strategy,
+            config=ServerConfig(num_rounds=config.num_rounds),
+        )
+
+
+    client_app = ClientApp(
+        client_fn=get_client_fn(
+            train_dataset, test_dataset,
+            config.num_clients, config.num_byzantine,
+            use_dp=config.use_dp, epsilon=config.epsilon,
+            use_topk=config.use_topk, topk_ratio=config.topk_ratio,
+            num_rounds=config.num_rounds
+        )
+    )
+    server_app = ServerApp(server_fn=server_fn)
+
+    fl.simulation.run_simulation(
+        server_app=server_app,
+        client_app=client_app,
+        num_supernodes=config.num_clients,
+        backend_config={"client_resources": {"num_cpus": 1, "num_gpus": 0.0}},
+    )
+
+    ray.shutdown()
+    return run_history
+
+
 if __name__ == "__main__":
     train_dataset, test_dataset, root_loader = load_datasets(ROOT_DATASET_SIZE)
 
@@ -204,7 +329,8 @@ if __name__ == "__main__":
         client_fn=get_client_fn(
             train_dataset, test_dataset, NUM_CLIENTS,
             NUM_BYZANTINE_CLIENTS, use_dp=USE_DP,
-            epsilon=EPSILON,
+            epsilon=EPSILON, use_topk=USE_TOPK,
+            topk_ratio=TOPK_RATIO,
         )
     )
 
@@ -212,8 +338,9 @@ if __name__ == "__main__":
     print("\nStarting simulation...")
     print(f"  Clients:   {NUM_CLIENTS} ({NUM_BYZANTINE_CLIENTS} malicious)")
     print(f"  Rounds:    {NUM_ROUNDS}")
-    print(f"  FLTrust:   {USE_FLTRUST}")
+    print(f"  FLTrust:   {USE_FLTRUST} (root-size={ROOT_DATASET_SIZE})")
     print(f"  DP:        {USE_DP} (epsilon={EPSILON})")
+    print(f"  TOP_K:     {USE_TOPK} (k={TOPK_RATIO})")
 
     history = fl.simulation.run_simulation(
         server_app=server_app,

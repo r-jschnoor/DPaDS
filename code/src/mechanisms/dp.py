@@ -8,7 +8,7 @@ def make_private(model,
                  target_epsilon,
                  target_delta,
                  max_grad_norm,
-                 epochs):
+                 num_rounds):
     """
     Wrap model, optimizer and dataloader with Opacus DP-SGD.
 
@@ -22,7 +22,7 @@ def make_private(model,
         target_epsilon (float):     privacy budget. Lower = more private.
         target_delta (float):       privacy failure probability. Usually 1e-5.
         max_grad_norm (float):      clipping threshold for per-sample gradients.
-        epochs (int):               number of training epochs planned.
+        num_rounds (int):           number of training rounds (each with 1 epoch) planned.
 
     Returns:
         tuple: (private_model, private_optimizer, private_loader, privacy_engine)
@@ -36,7 +36,7 @@ def make_private(model,
         target_epsilon=target_epsilon,
         target_delta=target_delta,
         max_grad_norm=max_grad_norm,
-        epochs=epochs,
+        epochs=num_rounds,
     )
 
     return private_model, private_optimizer, private_loader, privacy_engine
@@ -61,9 +61,6 @@ if __name__ == "__main__":
     # Imports here since they are only needed for testing and not if run in larger scope
     import torch.nn as nn
     from torch.utils.data import DataLoader, TensorDataset
-    import os
-    import sys
-    sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
     from models.mnist_cnn import MnistCNN
 
     # Dummy data to test wrapping
@@ -80,7 +77,7 @@ if __name__ == "__main__":
         target_epsilon=10.0,
         target_delta=1e-5,
         max_grad_norm=1.0,
-        epochs=1,
+        num_rounds=1,
     )
 
     print("Model wrapped successfully!")

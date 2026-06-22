@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fl-trilemma"
+version = "0.1.0"
+description = "Empirical study of the Privacy-Robustness-Performance trilemma in Federated Learning"
+authors = [
+  { name="Jonas Mueller", email="jonas.mueller-1@uni-hamburg.de" },
+  { name="Rebekka Schnoor", email="rebekka.schnoor@uni-hamburg.de" },
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "flwr[simulation]==1.31.0",
+    "flwr-datasets[vision]",
+    "opacus==1.6.0",
+    "torch>=2.6",
+    "torchvision>=0.21",
+    "numpy",
+    "scikit-learn",
+    "pandas",
+    "matplotlib",
+    "seaborn",
+    "pyyaml",
+    "tqdm",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]

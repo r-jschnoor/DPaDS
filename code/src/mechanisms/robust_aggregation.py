@@ -1,7 +1,3 @@
-import os
-import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -9,7 +5,7 @@ from torch.utils.data import DataLoader
 from flwr.server.strategy import FedAvg
 from flwr.common import parameters_to_ndarrays, ndarrays_to_parameters
 
-from models.mnist_cnn import MnistCNN
+from src.models.mnist_cnn import MnistCNN
 
 
 def cosine_similarity(a, b):
@@ -99,7 +95,7 @@ class FLTrustStrategy(FedAvg):
     def  __init__(self, root_loader, rescale_to_ref_norm=False, **kwargs):
         super().__init__(**kwargs)
         self.root_loader = root_loader
-        self.rescale_to_ref_norm=False
+        self.rescale_to_ref_norm=rescale_to_ref_norm
         self.ref_model = MnistCNN()
         self.ref_optimizer = torch.optim.SGD(self.ref_model.parameters(), lr=0.01)
         self.loss_fn = nn.CrossEntropyLoss()
@@ -201,7 +197,17 @@ class FLTrustStrategy(FedAvg):
             new_parameters.append(aggregated_norms[index:index+size].reshape(shape))
             index += size
         
-        return ndarrays_to_parameters(new_parameters), {}
+        # Aggregate fit metrics from clients
+        fit_metrics = [
+            (fit_result.num_examples, fit_result.metrics)
+            for _, fit_result in results
+            if fit_result.metrics
+        ]
+        aggregated_metrics = {}
+        if fit_metrics and self.fit_metrics_aggregation_fn:
+            aggregated_metrics = self.fit_metrics_aggregation_fn(fit_metrics)
+
+        return ndarrays_to_parameters(new_parameters), aggregated_metrics
 
 
 if __name__ == "__main__":
