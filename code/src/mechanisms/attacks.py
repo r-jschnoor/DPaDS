@@ -44,7 +44,7 @@ class LabelFlipClient(MnistClient):
             tuple: (updated_parameters, num_samples, metrics_dict)
         """
         self.set_parameters(parameters)
-        self.model_train()
+        self.model.train()
 
         for images, labels in self.train_loader:
             # Flip source_label -> target_label

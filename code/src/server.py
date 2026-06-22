@@ -4,13 +4,14 @@ from flwr.client import ClientApp
 from flwr.server.strategy import FedAvg
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, Subset
-import numpy as np
 import ray
 import os
 import warnings
 import logging
 
 from client import MnistClient
+from mechanisms.attacks import LabelFlipClient
+from mechanisms.robust_aggregation import FLTrustStrategy
 
 
 # Env
@@ -21,17 +22,47 @@ os.environ["RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO"] = "0"
 logging.getLogger("flwr").propagate = False
 
 # Suppress Flower deprecation warning
-warnings.filterwarnings("ignore", message="DEPRECATED")
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 
-# Globals
-NUM_CLIENTS = 16
-NUM_ROUNDS = 20
-USE_DP = True
-EPSILON = 10.0
+# TODO Check if trust scores work. Label flipping trust is similar to no flipping trust!
+
+# Globals (Config)
+NUM_CLIENTS                 = 5
+NUM_ROUNDS                  = 3
+NUM_BYZANTINE_CLIENTS       = 1
+USE_DP                      = False
+EPSILON                     = 10.0
+USE_FLTRUST                 = True
+ROOT_DATASET_SIZE           = 2000   # Sample count the server holds
+USE_RESCALE_TO_REF_NORM     = False  # Whether the server should normalize the clients gradients. Paper uses it but the available resources are not enough to mirror so its turned off for now. This is mostly to protect against malicious clients that send massive updates to gain an advantage to honest clients by size.
 
 
-def get_client_fn(train_dataset, test_dataset, num_clients, use_dp=False, epsilon=10.0):
+def load_datasets(root_dataset_size):
+    """
+    Loader MNIST train/test datasets and create the server root loader.
+
+    Args:
+        root_dataset_size (int): number of clean samples the server holds.
+
+    Returns:
+        tuple: (train_dataset, test_dataset, root_loader)
+    """
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.5,), (0.5,))
+    ])
+    train_dataset = datasets.MNIST(root="data/", train=True,  download=True, transform=transform)
+    test_dataset  = datasets.MNIST(root="data/", train=False, download=True, transform=transform)
+    root_subset   = Subset(train_dataset, list(range(root_dataset_size)))
+    root_loader   = DataLoader(root_subset, batch_size=32, shuffle=True)
+
+    return train_dataset, test_dataset, root_loader
+
+
+def get_client_fn(train_dataset, test_dataset, num_clients,
+                  num_byzantine=0, use_dp=False, epsilon=10.0):
     """
     Returns a function that creates a client with it own data slice.
 
@@ -39,16 +70,19 @@ def get_client_fn(train_dataset, test_dataset, num_clients, use_dp=False, epsilo
     client gets a unique slice of the training data, simulating real 
     FL where each device has its own local dataset.
 
+    The first num_byzantine clients are malicious LabelFlipClients,
+    the rest are honest MnistClients.
+
     Args:
-        train_dataset:       full MNIST training dataset.
-        test_dataset:        full MNIST test dataset.
-        num_clients (int):   total number of simulated clients.
-        use_dp (bool):       whether to wrap training with Opacus DP-SGD.
-        epsilon (float):     privacy budget target. Only used when use_dp=True.
+        train_dataset:           full MNIST training dataset.
+        test_dataset:            full MNIST test dataset.
+        num_clients (int):       total number of simulated clients.
+        num_byzantine (int):     how many clients are malicious.
+        use_dp (bool):           whether to wrap training with DP-SGD.
+        epsilon (float):         privacy budget. Only used when use_dp=True.
 
     Returns:
         function: client_fn(context) -> flwr.client.Client
-    
     """
     def client_fn(context):
         """
@@ -77,6 +111,13 @@ def get_client_fn(train_dataset, test_dataset, num_clients, use_dp=False, epsilo
         train_loader = DataLoader(client_train, batch_size=32, shuffle=True)
         test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 
+        # First num_byzantine clients are malicious
+        if client_id < num_byzantine:
+            return LabelFlipClient(
+                client_id, train_loader, test_loader,
+                source_label=7, target_label=1,
+            ).to_client()
+        
         return MnistClient(
             client_id, train_loader, test_loader,
             use_dp=use_dp, epsilon=epsilon
@@ -85,25 +126,51 @@ def get_client_fn(train_dataset, test_dataset, num_clients, use_dp=False, epsilo
     return client_fn
 
 
-def server_fn(context):
+def get_server_fn(root_loader, use_rescale_to_ref_norm, use_fltrust, num_clients, num_rounds):
     """
-    Configure and return the server components.
+    Return a function that creates a ServerComponents object.
 
     Args:
-        context (flwr.common.Context): Flower server context.
+        root_loader (DataLoader): small clean server-held dataset.
+        use_fltrust (bool):       whether to use FLTrust or plain FedAvg.
+        num_clients (int):        total number of clients.
+        num_rounds (int):         number of FL rounds.
 
     Returns:
-        ServerAppComponents: strategy and config bundled for Flower.
+        function: server_fn(context) -> ServerAppComponents
     """
-    # FedAvg strategy -> Aggregates client weights by weighted average
-    aggregation_strategy = FedAvg(
-        fraction_fit=1.0,               # Use 100% of clients each round
-        min_available_clients=NUM_CLIENTS,
-        fit_metrics_aggregation_fn=weighted_average_metrics,
-        evaluate_metrics_aggregation_fn=weighted_average_metrics,
-    )
-    config = ServerConfig(num_rounds=NUM_ROUNDS)
-    return ServerAppComponents(strategy=aggregation_strategy, config=config)
+    def server_fn(context):
+        """
+        Configure and return the server components.
+
+        Args:
+            context (flwr.common.Context): Flower server context.
+
+        Returns:
+            ServerAppComponents: strategy and config bundled for Flower.
+        """
+        if use_fltrust:
+            aggregation_strategy = FLTrustStrategy(
+                root_loader=root_loader,
+                rescale_to_ref_norm=use_rescale_to_ref_norm,
+                fraction_fit=1.0,
+                min_available_clients=num_clients,
+                fit_metrics_aggregation_fn=weighted_average_metrics,
+                evaluate_metrics_aggregation_fn=weighted_average_metrics,
+            )
+        else:
+            # FedAvg strategy -> Aggregates client weights by weighted average
+            aggregation_strategy = FedAvg(
+                fraction_fit=1.0,               # Use 100% of clients each round
+                min_available_clients=num_clients,
+                fit_metrics_aggregation_fn=weighted_average_metrics,
+                evaluate_metrics_aggregation_fn=weighted_average_metrics,
+            )
+
+        config = ServerConfig(num_rounds=num_rounds)
+        return ServerAppComponents(strategy=aggregation_strategy, config=config)
+    
+    return server_fn
 
 
 def weighted_average_metrics(metrics):
@@ -130,24 +197,24 @@ def weighted_average_metrics(metrics):
 
 
 if __name__ == "__main__":
-    # Load data once and then share only references
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,))
-    ])
-    train_dataset = datasets.MNIST(root="data/", train=True, download=True, transform=transform)
-    test_dataset = datasets.MNIST(root="data/", train=False, download=True, transform=transform)
+    train_dataset, test_dataset, root_loader = load_datasets(ROOT_DATASET_SIZE)
 
-    server_app = ServerApp(server_fn=server_fn)
+    server_app = ServerApp(server_fn=get_server_fn(root_loader, USE_RESCALE_TO_REF_NORM, USE_FLTRUST, NUM_CLIENTS, NUM_ROUNDS))
     client_app = ClientApp(
         client_fn=get_client_fn(
             train_dataset, test_dataset, NUM_CLIENTS,
-            use_dp=USE_DP, epsilon=EPSILON
-            )
+            NUM_BYZANTINE_CLIENTS, use_dp=USE_DP,
+            epsilon=EPSILON,
+        )
     )
 
     # Run the simulation
     print("\nStarting simulation...")
+    print(f"  Clients:   {NUM_CLIENTS} ({NUM_BYZANTINE_CLIENTS} malicious)")
+    print(f"  Rounds:    {NUM_ROUNDS}")
+    print(f"  FLTrust:   {USE_FLTRUST}")
+    print(f"  DP:        {USE_DP} (epsilon={EPSILON})")
+
     history = fl.simulation.run_simulation(
         server_app=server_app,
         client_app=client_app,
