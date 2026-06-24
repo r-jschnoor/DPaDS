@@ -135,7 +135,7 @@ class FLTrustStrategy(FedAvg):
 
         # Extract client updates as flat vectors
         client_updates = []
-        num_samples = []        # TODO Unused for now but might add to analysis later
+        num_samples = []        # Unused for now but might add to analysis later
 
         for _, fit_result in results:
             parameters = parameters_to_ndarrays(fit_result.parameters)

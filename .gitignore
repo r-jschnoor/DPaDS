@@ -37,3 +37,5 @@
 *.synctex.gz(busy)
 *.run.xml
 
+
+.venvD/

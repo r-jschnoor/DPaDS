@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import time
+from tqdm import tqdm
 
 from src.experiment_config import ExperimentConfig
 from src.server import run_simulation_with_config
@@ -13,10 +14,10 @@ from src.server import run_simulation_with_config
 # --------- Global setup ----------
 # Shared parameters across all experiments
 SHARED_PARAMS = dict(
-    num_clients = 3,
-    num_rounds = 3,
-    num_byzantine = 1,
-    root_dataset_size = 2000,
+    num_clients = 15,
+    num_rounds = 20,
+    num_byzantine = 3,
+    root_dataset_size = 800,
     rescale_to_ref_norm = False,
 )
 
@@ -235,8 +236,8 @@ if __name__ == "__main__":
     multi_run = len(configs_to_run) > 1
 
     print(f"Configs to run: {len(configs_to_run)}")
-    for config in configs_to_run:
-        print(f"Running config {config.config_id} | dp={config.use_dp} / epsilon={config.epsilon} / "
+    for config in tqdm(configs_to_run, desc="Grid runs", position=0, leave=True):
+        print(f"\nRunning config {config.config_id} | dp={config.use_dp} / epsilon={config.epsilon} / "
               f"fltrust={config.use_fltrust} / topk={config.use_topk} / k={config.topk_ratio} / "
               f"multirun={len(configs_to_run)>1}")
         print(f"\n\n{'-'*10} RUN {'-'*10}\n\n")

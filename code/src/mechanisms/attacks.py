@@ -50,8 +50,10 @@ class LabelFlipClient(MnistClient):
         self.model.train()
 
         for images, labels in self.train_loader:
-            # Flip source_label -> target_label
+            # Flip source_label <-> target_label
+            # TODO Try to use other numbers
             labels[labels == self.source_label] = self.target_label
+            labels[labels == self.target_label] = self.source_label
 
             self.optimizer.zero_grad()
             outputs = self.model(images)
