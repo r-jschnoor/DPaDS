@@ -6,7 +6,7 @@ import warnings
 
 from src.mechanisms.topk import topk_sparsify
 from src.models.mnist_cnn import MnistCNN
-from src.mechanisms.dp import make_private, get_privacy_spent
+from src.mechanisms.dp import compute_noise_multiplier, make_private, get_privacy_spent, make_private_with_noise_multiplier, restore_accountant_state, serialize_accountant_state
 
 warnings.filterwarnings("ignore", message="Secure RNG turned off")
 warnings.filterwarnings("ignore", message="Optimal order is the largest alpha")
@@ -28,20 +28,23 @@ class MnistClient(fl.client.NumPyClient):
         self.use_dp = use_dp
         self.epsilon = epsilon
         self.delta = delta
-        self.privacy_engine = None
         self.use_topk = use_topk
         self.topk_ratio = topk_ratio
+        self.num_rounds = num_rounds
+        self.privacy_engine = None
 
         if use_dp and train_loader is not None:
-            self.model, self.optimizer, self.train_loader, self.privacy_engine = make_private(
-                model=self.model,
-                optimizer=self.optimizer,
-                data_loader=self.train_loader,
+            dataset_size = len(train_loader.dataset)
+            batch_size = train_loader.batch_size
+            sample_rate = batch_size / dataset_size
+            self.noise_multiplier = compute_noise_multiplier(
                 target_epsilon=epsilon,
                 target_delta=delta,
-                max_grad_norm=1.0,
+                sample_rate=sample_rate,
                 num_rounds=num_rounds,
             )
+        else:
+            self.noise_multiplier = None
 
     
     def get_parameters(self, config):
@@ -91,7 +94,7 @@ class MnistClient(fl.client.NumPyClient):
         state_dict = {k: torch.tensor(v) for k, v in params_dict}       # Numpy array back to Tensor
         self.model.load_state_dict(state_dict, strict=True)         # Reinserts the new weights into the model. strict=True means that no extra or missing values are allowed.
 
-    
+
     def fit(self, parameters, config):
         """
         Train the model on local data for one round.
@@ -112,21 +115,44 @@ class MnistClient(fl.client.NumPyClient):
         """
         # Load global weights into local model
         self.set_parameters(parameters)
+        
+        ACCOUNTANT_STATE_KEY = "accountant_state"
+
+        # Recreate privacy engine
+        if self.use_dp and self.noise_multiplier is not None:
+            model_tmp = MnistCNN()
+            model_tmp.load_state_dict(self.model.state_dict())
+            opt_tmp = torch.optim.SGD(model_tmp.parameters(), lr=0.01)
+            model_tmp, opt_tmp, train_loader, self.privacy_engine = make_private_with_noise_multiplier(
+                model_tmp, opt_tmp, self.train_loader,
+                self.noise_multiplier, max_grad_norm=1.0,
+            )
+            # Restore accountant state
+            if ACCOUNTANT_STATE_KEY in config:
+                restore_accountant_state(self.privacy_engine, config[ACCOUNTANT_STATE_KEY])
+        else:
+            model_tmp = self.model
+            opt_tmp = self.optimizer
+            train_loader = self.train_loader
 
         # Training loop
-        self.model.train()
-        for images, labels in self.train_loader:
-            self.optimizer.zero_grad()
-            outputs = self.model(images)
+        model_tmp.train()
+
+        for images, labels in train_loader:
+            opt_tmp.zero_grad()
+            outputs = model_tmp(images)
             loss = self.loss_fn(outputs, labels)
             loss.backward()
-            self.optimizer.step()
+            opt_tmp.step()
+
+        if self.use_dp and self.noise_multiplier is not None:
+            self.model.load_state_dict(model_tmp._module.state_dict())
 
         metrics = {}
         if self.use_dp and self.privacy_engine is not None:
-            epsilon = get_privacy_spent(self.privacy_engine, self.delta)
-            metrics["epsilon"] = epsilon
-            print(f"  [LOG DP] Client {self.client_id} | epsilon = {epsilon:.4f}")
+            metrics["epsilon"] = get_privacy_spent(self.privacy_engine, self.delta)
+            metrics[ACCOUNTANT_STATE_KEY] = serialize_accountant_state(self.privacy_engine)
+            metrics["noise_multiplier"] = self.noise_multiplier
 
         updated_parameters = self.get_parameters(config={})
 

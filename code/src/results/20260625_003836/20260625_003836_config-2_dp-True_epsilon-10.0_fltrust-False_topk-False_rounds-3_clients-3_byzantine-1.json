@@ -1,0 +1,39 @@
+{
+  "config": {
+    "config_id": 2,
+    "num_clients": 3,
+    "num_rounds": 3,
+    "num_byzantine": 1,
+    "use_dp": true,
+    "epsilon": 10.0,
+    "delta": 1e-05,
+    "use_fltrust": false,
+    "use_topk": false,
+    "topk_ratio": 0.1,
+    "root_dataset_size": 800,
+    "rescale_to_ref_norm": false
+  },
+  "results": {
+    "elapsed_seconds": 203.72704029083252,
+    "per_round": [
+      {
+        "round": 1,
+        "loss": 2.2053082994759654,
+        "accuracy": 0.2612999999999999,
+        "epsilon": 8.046295714789652
+      },
+      {
+        "round": 2,
+        "loss": 1.903458462355617,
+        "accuracy": 0.5096000000000002,
+        "epsilon": 9.175524103289053
+      },
+      {
+        "round": 3,
+        "loss": 1.3889427242187646,
+        "accuracy": 0.6582,
+        "epsilon": 9.998739532679373
+      }
+    ]
+  }
+}

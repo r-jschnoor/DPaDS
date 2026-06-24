@@ -1,5 +1,40 @@
+import json
+import numpy as np
 from opacus import PrivacyEngine
+from opacus.accountants.utils import get_noise_multiplier
 import torch
+
+
+def serialize_accountant_state(privacy_engine):
+    """
+    Serializes the accountant's state as a JSON string.
+
+    Uses the accountant's built-in state_dict.
+
+    Args:
+        privacy_engine (PrivacyEngine): the Opacus engine after training.
+
+    Returns:
+        str: JSON string of accountant state_dict.
+    """
+    return json.dumps(privacy_engine.accountant.state_dict())
+
+
+def restore_accountant_state(privacy_engine, accountant_state):
+    """
+    Restores an accounant's state from a JSON string into
+    a fresh engine.
+
+    Args:
+        privacy_engine (PrivacyEngine): freshly created engine to restore into.
+        accountant_state (str):         JSON string containing the state_dict of an accountant
+
+    Returns:
+        None: modifies privacy_engine.accountant.steps in place.
+    """
+    state = json.loads(accountant_state)
+    state["history"] = [tuple(h) for h in state["history"]]
+    privacy_engine.accountant.load_state_dict(state)
 
 
 def make_private(model,
@@ -37,8 +72,39 @@ def make_private(model,
         target_delta=target_delta,
         max_grad_norm=max_grad_norm,
         epochs=num_rounds,
+        accountant="rdp",
     )
 
+    return private_model, private_optimizer, private_loader, privacy_engine
+
+
+def make_private_with_noise_multiplier(model, optimizer, data_loader, noise_multiplier,
+                                       max_grad_norm):
+    """
+    Wrap model, optimizer and dataloader with Opacus DP-SGD.
+
+    Uses a fixed noise multiplier that calculates the privacy spent
+    based on the current step count, instead of using target epsilon, so that
+    the accountant state can be persisted and restored across FL rounds.
+
+    Args:
+        model (nn.Module):          the model to make private.
+        optimizer (torch.optim):    the optimizer to wrap.
+        data_loader (DataLoader):   the training dataloader to wrap.
+        noise_multiplier (float):   noise multiplier, computed once upfront.
+        max_grad_norm (float):      clipping threshold for per-sample gradients.
+
+    Returns:
+        tuple: (private_model, private_optimizer, private_loader, privacy_engine)
+    """
+    privacy_engine = PrivacyEngine(accountant="rdp")
+    private_model, private_optimizer, private_loader = privacy_engine.make_private(
+        module=model,
+        optimizer=optimizer,
+        data_loader=data_loader,
+        noise_multiplier=noise_multiplier,
+        max_grad_norm=max_grad_norm,
+    )
     return private_model, private_optimizer, private_loader, privacy_engine
 
 
@@ -55,6 +121,30 @@ def get_privacy_spent(privacy_engine, delta):
     """
     return privacy_engine.get_epsilon(delta=delta)
 
+
+def compute_noise_multiplier(target_epsilon, target_delta, sample_rate, num_rounds):
+    """
+    Computes the noise multiplier to achieve the target epsilon.
+
+    Calculated once at the beginning and is then reused across all
+    rounds. This keeps the noise level constant while the accountant
+    accumulates steps.
+
+    Args:
+        target_epsilon (float):  desired total privacy budget.
+        target_delta (float):    privacy failure probability.
+        sample_rate (float):     batch_size / dataset_size.
+        num_rounds (int):        total number of FL rounds.
+
+    Returns:
+        float: noise multiplier to pass to make_private.
+    """
+    return get_noise_multiplier(
+        target_epsilon=target_epsilon,
+        target_delta=target_delta,
+        sample_rate=sample_rate,
+        epochs=num_rounds,
+    )
 
 
 if __name__ == "__main__":

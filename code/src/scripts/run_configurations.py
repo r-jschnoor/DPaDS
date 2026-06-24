@@ -14,9 +14,9 @@ from src.server import run_simulation_with_config
 # --------- Global setup ----------
 # Shared parameters across all experiments
 SHARED_PARAMS = dict(
-    num_clients = 15,
-    num_rounds = 20,
-    num_byzantine = 3,
+    num_clients = 3,
+    num_rounds = 3,
+    num_byzantine = 1,
     root_dataset_size = 800,
     rescale_to_ref_norm = False,
 )
@@ -171,6 +171,7 @@ def save_results(config: ExperimentConfig, history,
         },
         "results": {
             "elapsed_seconds": elapsed_seconds,
+            "noise_multiplier": dict(history["metrics_distributed_fit"].get("noise_multiplier", [])).get(1),  # same across all rounds -> take round 1
             "per_round": [
                 {
                     "round": r,

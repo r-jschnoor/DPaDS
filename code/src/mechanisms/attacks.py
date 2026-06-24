@@ -1,8 +1,10 @@
 import numpy as np
+import torch
 
 from src.client import MnistClient
-from src.mechanisms.dp import get_privacy_spent
+from src.mechanisms.dp import get_privacy_spent, make_private_with_noise_multiplier, restore_accountant_state, serialize_accountant_state
 from src.mechanisms.topk import topk_sparsify
+from src.models.mnist_cnn import MnistCNN
 
 
 class LabelFlipClient(MnistClient):
@@ -47,24 +49,49 @@ class LabelFlipClient(MnistClient):
             tuple: (updated_parameters, num_samples, metrics_dict)
         """
         self.set_parameters(parameters)
-        self.model.train()
+        ACCOUNTANT_STATE_KEY = "accountant_state"
+        
+        # Recreate privacy engine
+        if self.use_dp and self.noise_multiplier is not None:
+            model_tmp = MnistCNN()
+            model_tmp.load_state_dict(self.model.state_dict())
+            opt_tmp = torch.optim.SGD(model_tmp.parameters(), lr=0.01)
+            model_tmp, opt_tmp, train_loader, self.privacy_engine = make_private_with_noise_multiplier(
+                model_tmp, opt_tmp, self.train_loader,
+                self.noise_multiplier, max_grad_norm=1.0,
+            )
+            # Restore accountant state
+            if ACCOUNTANT_STATE_KEY in config:
+                restore_accountant_state(self.privacy_engine, config[ACCOUNTANT_STATE_KEY])
+        else:
+            model_tmp = self.model
+            opt_tmp = self.optimizer
+            train_loader = self.train_loader
 
-        for images, labels in self.train_loader:
+        # Training loop
+        model_tmp.train()
+
+        for images, labels in train_loader:
             # Flip source_label <-> target_label
             # TODO Try to use other numbers
             labels[labels == self.source_label] = self.target_label
             labels[labels == self.target_label] = self.source_label
 
-            self.optimizer.zero_grad()
-            outputs = self.model(images)
+            opt_tmp.zero_grad()
+            outputs = model_tmp(images)
             loss = self.loss_fn(outputs, labels)
             loss.backward()
-            self.optimizer.step()
+            opt_tmp.step()
+            
+        if self.use_dp and self.noise_multiplier is not None:
+            self.model.load_state_dict(model_tmp._module.state_dict())
 
         metrics = {}
         if self.use_dp and self.privacy_engine is not None:
-            epsilon = get_privacy_spent(self.privacy_engine, self.delta)
-            metrics["epsilon"] = epsilon
+            metrics["epsilon"]           = get_privacy_spent(self.privacy_engine, self.delta)
+            metrics[ACCOUNTANT_STATE_KEY] = serialize_accountant_state(self.privacy_engine)
+            metrics["noise_multiplier"]  = self.noise_multiplier
+
         
         updated_parameters = self.get_parameters(config={})
 

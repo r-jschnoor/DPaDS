@@ -1,4 +1,7 @@
+from re import U
+
 import flwr as fl
+from flwr.common import FitIns
 from flwr.server import ServerApp, ServerConfig, ServerAppComponents
 from flwr.client import ClientApp
 from flwr.server.strategy import FedAvg
@@ -52,11 +55,14 @@ class HistoryStrategyAdapter:
 
     Args:
         history (dict): shared dict to store per-round results.
+        accountant_manager (AccountantStateManager | None): manages per-client
+            DP accountant state across rounds. Pass None if DP is disabled.
     """
 
-    def __init__(self, history, **kwargs):
+    def __init__(self, history, accountant_manager=None, **kwargs):
         super().__init__(**kwargs)
         self.history = history
+        self.accountant_manager = accountant_manager
 
     def aggregate_evaluate(self, server_round, results, failures):
         loss, metrics = super().aggregate_evaluate(server_round, results, failures)
@@ -69,21 +75,111 @@ class HistoryStrategyAdapter:
         return loss, metrics
 
     def aggregate_fit(self, server_round, results, failures):
+        # First store accountant state per client
+        if self.accountant_manager is not None:
+            for client_proxy, fit_result in results:
+                if "accountant_state" in fit_result.metrics:
+                    self.accountant_manager.store(
+                        client_proxy.node_id,
+                        fit_result.metrics["accountant_state"]
+                    )
+
         params, metrics = super().aggregate_fit(server_round, results, failures)
+
         if metrics:
             for key, val in metrics.items():
                 self.history["metrics_distributed_fit"].setdefault(key, [])
                 self.history["metrics_distributed_fit"][key].append((server_round, val))
         return params, metrics
+    
+    def configure_fit(self, server_round, parameters, client_manager):
+        """
+        Override to send per-client accountant state in config
+        """
+        # Get default instructions
+        instructions = super().configure_fit(server_round, parameters, client_manager)
+
+        # No accountant manager -> Normal configure fit_is fine
+        if self.accountant_manager is None:
+            return instructions
+        
+        # Replace config for each client with accountant state of client
+        updated = []
+        for client_proxy, fit_ins in instructions:
+            config = {"server_round": server_round}
+            state = self.accountant_manager.get_state(client_proxy.node_id)
+            if state:
+                config["accountant_state"] = state
+            updated.append((client_proxy, FitIns(fit_ins.parameters, config)))
+
+        return updated
 
 
 class TrackingFedAvg(HistoryStrategyAdapter, FedAvg):
     """FedAvg with per-round history tracking."""
     pass
 
+
 class TrackingFLTrust(HistoryStrategyAdapter, FLTrustStrategy):
     """FLTrust with per-round history tracking."""
     pass
+
+
+class AccountantStateManager:
+    """
+    Stores and retrieves per-client accountant state across FL rounds.
+
+    Since Flower recreates clients each round due to its nature, the server
+    must hold the accountant state and pass it back to each client via
+    a config.
+
+    Args:
+        None
+    """
+
+    def __init__(self):
+        self._state = {}        # client_id -> accountant_state JSON string
+    
+    
+    def store(self, client_id: int, accountant_state_json: str):
+        """
+        Store accountant state for a client.
+
+        Args:
+            client_id (int):  client identifier.
+            state_json (str): serialized accountant state.
+        """
+        self._state[client_id] = accountant_state_json
+
+    
+    def get_config(self, client_id: int, server_round: int) -> dict:
+        """
+        Build fit config for a client including its accountant's state.
+
+        Args:
+            client_id (int):    client identifier.
+            server_round (int): current round number.
+
+        Returns:
+            dict: config to pass to client's fit() via Flower.
+        """
+        config = {"server_round": server_round}
+        if client_id in self._state:
+            config["accountant_state"] = self._state[client_id]
+        return config
+    
+
+    def get_state(self, node_id: int) -> str | None:
+        """
+        Get accountant state for a specific state.
+
+        Args:
+            node_id (int): the raw Flower node_id.
+
+        Returns:
+            str | None: serialized accountant state, or None if not yet stored.
+        """
+        return self._state.get(node_id)
 
 
 def load_datasets(root_dataset_size):
@@ -244,10 +340,18 @@ def weighted_average_metrics(metrics):
     aggregated = {}
 
     # Extract all metric keys from the first client (all clients have equal metrics anyways)
-    for key in metrics[0][1].keys():
-        aggregated[key] = sum(
-            num_samples * metric[key] for num_samples, metric in metrics
-        ) / total_samples
+    common_keys = set(metrics[0][1].keys())
+    for _, metric in metrics[1:]:
+        common_keys &= set(metric.keys())
+
+    for key in common_keys:
+        # Need to skip non-numeric metrics like accountant_state
+        try:
+            aggregated[key] = sum(
+                num_samples * metric[key] for num_samples, metric in metrics
+            ) / total_samples
+        except TypeError:
+            continue
 
     return aggregated
 
@@ -271,10 +375,14 @@ def run_simulation_with_config(config: ExperimentConfig):
         "metrics_distributed_fit": {},
     }
 
+    # Shared state manager to persist states across rounds
+    accountant_manager = AccountantStateManager() if config.use_dp else None
+
     # Strategies with tracking
     if config.use_fltrust:
         strategy = TrackingFLTrust(
             history=run_history,
+            accountant_manager=accountant_manager,
             root_loader=root_loader,
             rescale_to_ref_norm=config.rescale_to_ref_norm,
             fraction_fit=1.0,
@@ -285,6 +393,7 @@ def run_simulation_with_config(config: ExperimentConfig):
     else:
         strategy = TrackingFedAvg(
             history=run_history,
+            accountant_manager=accountant_manager,
             fraction_fit=1.0,
             min_available_clients=config.num_clients,
             fit_metrics_aggregation_fn=weighted_average_metrics,
@@ -314,7 +423,10 @@ def run_simulation_with_config(config: ExperimentConfig):
         server_app=server_app,
         client_app=client_app,
         num_supernodes=config.num_clients,
-        backend_config={"client_resources": {"num_cpus": 1, "num_gpus": 0.0}},
+        backend_config={
+            "client_resources": {"num_cpus": 1, "num_gpus": 0.0},
+            "init_args": {"log_to_driver": True},
+        },
     )
 
     ray.shutdown()
