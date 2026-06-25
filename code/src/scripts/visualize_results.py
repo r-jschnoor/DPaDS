@@ -536,6 +536,272 @@ def visualize_radar_chart_per_config(folder: str) -> None:
     plt.close()
 
 
+def visualize_confusion_matrices(folder: str) -> None:
+    """
+    One subplot per config showing confusion matrix as heatmap.
+
+    Args:
+        folder (str): path to folder containing result JSON files.
+    """
+    results = load_results(folder)
+
+    # Group by config_id, pick variant with best final accuracy
+    config_matrices = group_by_config_id(results)
+
+    num_configs = len(config_matrices)
+    cols        = min(4, num_configs)
+    rows        = (num_configs + cols - 1) // cols
+    fig, axes   = plt.subplots(rows, cols, figsize=(cols * 4, rows * 4))
+    fig.suptitle("Confusion Matrices per Config (best variant)", fontsize=13)
+    if rows == 1 and cols == 1:
+        axes = [axes]
+    else:
+        axes = np.array(axes).flatten()
+
+    digit_labels = [str(i) for i in range(10)]
+
+    for idx, (config_id, (label, _, matrix)) in enumerate(sorted(config_matrices.items())):
+        ax  = axes[idx]
+        mat = np.array(matrix)
+
+        # normalize by row (true label) to show percentages
+        row_sums = mat.sum(axis=1, keepdims=True)
+        mat_norm = np.where(row_sums > 0, mat / row_sums, 0)
+
+        im = ax.imshow(mat_norm, interpolation="nearest", cmap="Blues", vmin=0, vmax=1)
+        ax.set_title(f"Config {config_id}\n{label}", fontsize=7)
+        ax.set_xlabel("Predicted", fontsize=8)
+        ax.set_ylabel("True", fontsize=8)
+        ax.set_xticks(range(10))
+        ax.set_yticks(range(10))
+        ax.set_xticklabels(digit_labels, fontsize=6)
+        ax.set_yticklabels(digit_labels, fontsize=6)
+
+        # annotate cells with percentage
+        for i in range(10):
+            for j in range(10):
+                ax.text(j, i, f"{mat_norm[i,j]:.0%}",
+                        ha="center", va="center",
+                        fontsize=4,
+                        color="white" if mat_norm[i,j] > 0.5 else "black")
+
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    # hide unused subplots
+    for idx in range(len(config_matrices), len(axes)):
+        axes[idx].set_visible(False)
+
+    plt.tight_layout()
+    output_path = os.path.join(folder, "confusion_matrices.png")
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    print(f"Saved to: {output_path}")
+    plt.close()
+
+
+def visualize_f1_score(folder: str) -> None:
+    """
+    One subplot per config showing per-class F1, precision, recall.
+
+    Args:
+        folder (str): path to folder containing result JSON files.
+    """
+    results = load_results(folder)
+
+    # Group by config_id, pick variant with best final accuracy
+    config_scores = group_by_config_id(results)
+
+    num_configs = len(config_scores)
+    cols        = min(4, num_configs)
+    rows        = (num_configs + cols - 1) // cols
+    fig, axes   = plt.subplots(rows, cols, figsize=(cols * 4, rows * 3.5))
+    fig.suptitle("Per-class F1 / Precision / Recall per Config (best variant)", fontsize=13)
+    
+    if rows == 1 and cols == 1:
+        axes = [axes]
+    else:
+        axes = np.array(axes).flatten()
+
+    metrics     = ["precision", "recall", "f1"]
+    colors      = ["#4C72B0", "#55A868", "#C44E52"]
+    digit_labels = [str(i) for i in range(10)]
+    x           = np.arange(10)
+    width       = 0.25
+
+    for idx, (config_id, (label, scores, _)) in enumerate(sorted(config_scores.items())):
+        ax = axes[idx]
+
+        for m_idx, (metric, color) in enumerate(zip(metrics, colors)):
+            values = [scores[str(d)][metric] for d in range(10)]
+            ax.bar(x + m_idx * width, values, width, label=metric, color=color, alpha=0.85)
+
+        ax.set_title(f"Config {config_id}\n{label}", fontsize=7)
+        ax.set_xlabel("Digit class", fontsize=8)
+        ax.set_ylabel("Score", fontsize=8)
+        ax.set_xticks(x + width)
+        ax.set_xticklabels(digit_labels, fontsize=7)
+        ax.set_ylim(0, 1.1)
+        ax.grid(axis="y", alpha=0.3)
+        ax.legend(fontsize=6, loc="lower right")
+
+    for idx in range(len(config_scores), len(axes)):
+        axes[idx].set_visible(False)
+
+    plt.tight_layout()
+    output_path = os.path.join(folder, "f1_charts.png")
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    print(f"Saved to: {output_path}")
+    plt.close()
+
+
+def visualize_f1_tables(folder: str) -> None:
+    """
+    One summary table per config showing TP/FP/FN/TN and F1 metrics per digit class.
+
+    Saves one PNG per config into a 'f1_tables' subfolder.
+
+    Args:
+        folder (str): path to folder containing result JSON files.
+    """
+    results = load_results(folder)
+
+    config_data = group_by_config_id(results)
+
+    os.makedirs(os.path.join(folder, "f1_tables"), exist_ok=True)
+
+    for config_id, (label, scores, matrix) in sorted(config_data.items()):
+        fig, ax = plt.subplots(figsize=(12, 4))
+        test_size = sum(sum(row) for row in matrix)
+        ax.set_title(f"Config {config_id} - {label} (n={test_size:,})", fontsize=10, pad=10)
+        ax.axis("off")
+
+        num_classes  = 10
+        col_labels   = ["Class", "TP", "FP", "FN", "TN", "Precision", "Recall", "F1"]
+        table_data   = []
+
+        for i in range(num_classes):
+            tp = matrix[i][i]
+            fp = sum(matrix[r][i] for r in range(num_classes)) - tp
+            fn = sum(matrix[i][c] for c in range(num_classes)) - tp
+            tn = sum(
+                matrix[r][c]
+                for r in range(num_classes)
+                for c in range(num_classes)
+            ) - tp - fp - fn
+
+            precision = scores[str(i)]["precision"]
+            recall    = scores[str(i)]["recall"]
+            f1        = scores[str(i)]["f1"]
+
+            table_data.append([
+                str(i),
+                f"{tp:,}", f"{fp:,}", f"{fn:,}", f"{tn:,}",
+                f"{precision:.3f}", f"{recall:.3f}", f"{f1:.3f}",
+            ])
+
+        # Sum row
+        total_tp = sum(matrix[i][i] for i in range(num_classes))
+        total_fp = sum(
+            sum(matrix[r][i] for r in range(num_classes)) - matrix[i][i]
+            for i in range(num_classes)
+        )
+        total_fn = sum(
+            sum(matrix[i][c] for c in range(num_classes)) - matrix[i][i]
+            for i in range(num_classes)
+        )
+        total_tn = sum(
+            sum(matrix[r][c] for r in range(num_classes) for c in range(num_classes))
+            - matrix[i][i]
+            - (sum(matrix[r][i] for r in range(num_classes)) - matrix[i][i])
+            - (sum(matrix[i][c] for c in range(num_classes)) - matrix[i][i])
+            for i in range(num_classes)
+        )
+
+        # Macro averages for precision, recall, f1
+        macro_precision = sum(scores[str(i)]["precision"] for i in range(num_classes)) / num_classes
+        macro_recall    = sum(scores[str(i)]["recall"]    for i in range(num_classes)) / num_classes
+        macro_f1        = sum(scores[str(i)]["f1"]        for i in range(num_classes)) / num_classes
+
+        table_data.append([
+            "Total",
+            f"{total_tp:,}", f"{total_fp:,}", f"{total_fn:,}", f"{total_tn:,}",
+            f"{macro_precision:.3f}", f"{macro_recall:.3f}", f"{macro_f1:.3f}",
+        ])
+
+        table = ax.table(
+            cellText=table_data,
+            colLabels=col_labels,
+            loc="center",
+            cellLoc="center",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1, 1.5)
+
+        # Color the sum row
+        for j in range(len(col_labels)):
+            table[num_classes + 1, j].set_facecolor("#D0D0D0")
+            table[num_classes + 1, j].set_text_props(fontweight="bold")
+
+
+        # color the diagonal (correct predictions) green, others light red
+        for i in range(num_classes):
+            # header row is row 0, data starts at row 1
+            for j, col in enumerate(col_labels):
+                cell = table[i + 1, j]
+                if col == "F1":
+                    f1_val = scores[str(i)]["f1"]
+                    # green gradient based on F1 score
+                    cell.set_facecolor(
+                        (1 - f1_val * 0.5, 1, 1 - f1_val * 0.5)
+                    )
+                elif col == "Class":
+                    cell.set_facecolor("#E8E8E8")
+
+        plt.tight_layout()
+        output_path = os.path.join(folder, "f1_tables", f"f1_table_config_{config_id}.png")
+        plt.savefig(output_path, dpi=150, bbox_inches="tight")
+        print(f"Saved to: {output_path}")
+        plt.close()
+
+
+def group_by_config_id(results):
+    """
+    Group results by config_id keeping the best accuracy variant per config.
+
+    For configs with multiple variants (e.g. different epsilon or topk values),
+    only the variant with the highest final round accuracy is kept.
+    Results without per_class_scores are skipped.
+
+    Args:
+        results (list[dict]): list of loaded result dicts from load_results().
+
+    Returns:
+        dict: mapping config_id (int) to (label, per_class_scores, confusion_matrix) where
+              - label (str):              short human-readable label from make_label()
+              - per_class_scores (dict):  per-class precision, recall and F1 scores
+                                          keyed by digit class string e.g. "0".."9"
+              - confusion_matrix (list):  10x10 list of lists, or None if not present
+    """
+    config_scores = {}
+    for result in results:
+        config_id      = result["config"]["config_id"]
+        per_class      = result["results"].get("per_class_scores")
+        confusion_matrix = result["results"].get("confusion_matrix")
+        final_accuracy = result["results"]["per_round"][-1].get("accuracy", 0)
+        label          = make_label(result["_filename"])
+
+        if per_class is None:
+            continue
+
+        if config_id not in config_scores or final_accuracy > config_scores[config_id][3]:
+            config_scores[config_id] = (label, per_class, confusion_matrix, final_accuracy)
+
+    return {
+        config_id: (label, scores, matrix)
+        for config_id, (label, scores, matrix, _) in config_scores.items()
+    }
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Visualize FL trilemma results from a results folder.",
@@ -547,7 +813,8 @@ if __name__ == "__main__":
         help="path to folder containing result JSON files",
     )
     parser.add_argument("--plot", type=str,
-                        choices=["all", "lines", "bar", "radar", "radar_per_conf", "lines_per_conf"],
+                        choices=["all", "lines", "bar", "radar", "radar_per_conf", "lines_per_conf",
+                                 "confusion", "f1_chart", "f1_table_per_conf"],
                         default="all",
                         help="which plot to generate (default: all)")
     args = parser.parse_args(args=None if len(sys.argv) > 1 else ["--help"])
@@ -562,3 +829,9 @@ if __name__ == "__main__":
         visualize_radar_chart_per_config(args.folder)
     if args.plot in ("all", "lines_per_conf"):
         visualize_lines_per_config(args.folder)
+    if args.plot in ("all", "confusion"):
+        visualize_confusion_matrices(args.folder)
+    if args.plot in ("all", "f1_chart"):
+        visualize_f1_score(args.folder)
+    if args.plot in ("all", "f1_table_per_conf"):
+        visualize_f1_tables(args.folder)

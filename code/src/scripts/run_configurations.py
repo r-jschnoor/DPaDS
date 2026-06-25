@@ -6,8 +6,10 @@ import json
 import os
 import sys
 import time
+from sklearn.metrics import confusion_matrix
 from tqdm import tqdm
 
+from src.constants import NUM_CLASSES_MNIST
 from src.experiment_config import ExperimentConfig
 from src.server import run_simulation_with_config
 
@@ -128,6 +130,65 @@ def make_filename(config: ExperimentConfig, run_timestamp: str) -> str:
     return "_".join(parts) + ".json"
 
 
+def inflate_confusion_matrix_mnist_and_calculate_scores(config: ExperimentConfig, history: dict):
+    """
+    Reconstruct confusion matrix and compute per-class metrics from history.
+
+    Extracts the flat cm_i_j metrics from the final round of the distributed
+    evaluate history, reconstructs the full 10x10 confusion matrix, and
+    computes precision, recall and F1 score per digit class.
+
+    Args:
+        config (ExperimentConfig): experiment configuration, used for num_rounds
+                                   and num_classes.
+        history (dict):            run history from run_simulation_with_config,
+                                   must contain metrics_distributed_evaluate
+                                   with cm_i_j keys.
+
+    Returns:
+        tuple: (per_class, confusion_matrix)
+            - per_class (dict | None):        dict mapping digit class (str) to
+                                              precision, recall and f1 scores.
+                                              None if no cm_ entries found.
+            - confusion_matrix (list | None): 10x10 list of lists where
+                                              confusion_matrix[i][j] is the count
+                                              of samples with true label i
+                                              predicted as j.
+                                              None if no cm_ entries found.
+    """
+    last_round = config.num_rounds
+    cm_entries = {
+        key: dict(vals).get(last_round)
+        for key, vals in history["metrics_distributed_evaluate"].items()
+        if key.startswith("cm_")
+    }
+    confusion_matrix = None
+    if cm_entries:
+        confusion_matrix = [
+            [int(cm_entries.get(f"cm_{i}_{j}", 0) or 0) for j in range(NUM_CLASSES_MNIST)]
+            for i in range(NUM_CLASSES_MNIST)
+        ]
+
+    # Compute per-class metrics from confusion matrix
+    per_class = None
+    if confusion_matrix:
+        per_class = {}
+        for i in range(NUM_CLASSES_MNIST):
+            tp = confusion_matrix[i][i]
+            fp = sum(confusion_matrix[r][i] for r in range(NUM_CLASSES_MNIST)) - tp
+            fn = sum(confusion_matrix[i][c] for c in range(NUM_CLASSES_MNIST)) - tp
+            precision  = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+            recall     = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+            f1         = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+            per_class[str(i)] = {
+                "precision": round(precision, 4),
+                "recall":    round(recall, 4),
+                "f1":        round(f1, 4),
+            }
+
+    return per_class, confusion_matrix
+
+
 def save_results(config: ExperimentConfig, history,
                  elapsed_seconds: float, run_timestamp: str, multi_run=False):
     """
@@ -154,6 +215,8 @@ def save_results(config: ExperimentConfig, history,
     accuracies = dict(history["metrics_distributed_evaluate"].get("accuracy", []))
     epsilons   = dict(history["metrics_distributed_fit"].get("epsilon", []))
 
+    per_class_scores, confusion_matrix = inflate_confusion_matrix_mnist_and_calculate_scores(config, history)
+
     results = {
         "config": {
             "config_id": config.config_id,
@@ -172,6 +235,8 @@ def save_results(config: ExperimentConfig, history,
         "results": {
             "elapsed_seconds": elapsed_seconds,
             "noise_multiplier": dict(history["metrics_distributed_fit"].get("noise_multiplier", [])).get(1),  # same across all rounds -> take round 1
+            "confusion_matrix": confusion_matrix,
+            "per_class_scores": per_class_scores,
             "per_round": [
                 {
                     "round": r,

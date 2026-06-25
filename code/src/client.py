@@ -1,9 +1,11 @@
 import numpy as np
+from sklearn.metrics import confusion_matrix
 import torch
 import torch.nn as nn
 import flwr as fl
 import warnings
 
+from src.constants import ACCURACY_KEY, NUM_CLASSES_MNIST
 from src.mechanisms.topk import topk_sparsify
 from src.models.mnist_cnn import MnistCNN
 from src.mechanisms.dp import compute_noise_multiplier, make_private, get_privacy_spent, make_private_with_noise_multiplier, restore_accountant_state, serialize_accountant_state
@@ -183,20 +185,23 @@ class MnistClient(fl.client.NumPyClient):
 
     def evaluate(self, parameters, config):
         """
-        Evaluate the model on local test data.
+        Evaluate the model on local test data and compute confusion matrix.
 
         Called by the Flower server (possibly at the end of each round) to measure
         how well the global model performs on each client's local test data.
+        Returns per-class prediction counts as confusion metrics metrics which
+        the server may aggregate into a full confusion matrix 
 
         Args:
             parameters (list[np.ndarray]): global model weights from the server.
-            config (dict): evaluation configuration sent by the server.
+            config (dict):                 evaluation configuration sent by the server.
 
         Returns:
             tuple: (loss, num_samples, metrics_dict)
-                - loss: average loss over the test set (Flower requires this)
-                - num_samples: how many samples we evaluated on
-                - metrics_dict: extra metrics, we include accuracy here
+                - loss:         average loss over the test set (required by Flower)
+                - num_samples:  how many samples we evaluated on
+                - metrics_dict: accuracy + confusion matrix entries as cm_i_j scalars
+                                where i=true label, j=predicted label
         """
         # Load global weights into local model
         self.set_parameters(parameters)
@@ -207,6 +212,10 @@ class MnistClient(fl.client.NumPyClient):
         total = 0
         total_loss = 0.0
 
+        # confusion matrix: 10x10 for MNIST
+        num_classes = NUM_CLASSES_MNIST
+        confusion_matrix = [[0] * num_classes for _ in range(num_classes)]
+
         # Evaluation
         with torch.no_grad():
             for images, labels in self.test_loader:
@@ -215,11 +224,20 @@ class MnistClient(fl.client.NumPyClient):
                 predicted = outputs.argmax(dim=1)
                 correct += (predicted == labels).sum().item()
                 total += labels.size(0)
+
+                for true, pred in zip(labels.tolist(), predicted.tolist()):
+                    confusion_matrix[true][pred] += 1
         
         accuracy = correct / total
         avg_loss = total_loss / len(self.test_loader)
 
-        return avg_loss, total, {"accuracy": accuracy}
+        # Flatten confusion matrix for transmission
+        metrics = {ACCURACY_KEY: accuracy}
+        for i in range(num_classes):
+            for j in range(num_classes):
+                metrics[f"cm_{i}_{j}"] = float(confusion_matrix[i][j])
+
+        return avg_loss, total, metrics
 
 
 
