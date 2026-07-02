@@ -99,7 +99,14 @@ class FLTrustStrategy(FedAvg):
         self.ref_model = MnistCNN()
         self.ref_optimizer = torch.optim.SGD(self.ref_model.parameters(), lr=0.01)
         self.loss_fn = nn.CrossEntropyLoss()
+        self.saved_global_parameters = None
 
+
+    def configure_fit(self, server_round, parameters, client_manager):
+        """Save global parameters before sending to clients."""
+        self.saved_global_parameters = parameters_to_ndarrays(parameters)
+        return super().configure_fit(server_round, parameters, client_manager)
+    
 
     def aggregate_fit(self, server_round, results, failures):
         """
@@ -116,12 +123,8 @@ class FLTrustStrategy(FedAvg):
         if not results:
             return None, {}
         
-        # Sync reference model and current global model so that
-        # the server and clients start from the same point in 
-        # each round
-        _, first_fit_result = results[0]
-        global_parameters = parameters_to_ndarrays(first_fit_result.parameters)
-        parameters_dict = zip(self.ref_model.state_dict().keys(), global_parameters)
+        server_state_parameters = self.saved_global_parameters
+        parameters_dict = zip(self.ref_model.state_dict().keys(), server_state_parameters)
         state_dict = {k: torch.tensor(v) for k, v in parameters_dict}
         self.ref_model.load_state_dict(state_dict, strict=True)
         # Reset optimizer as per paper
@@ -133,6 +136,10 @@ class FLTrustStrategy(FedAvg):
             self.ref_optimizer, self.loss_fn
         )    
 
+
+        # Compute client updates as deltas from the saved global state
+        global_flattened = np.concatenate([p.flatten() for p in server_state_parameters])
+
         # Extract client updates as flat vectors
         client_updates = []
         num_samples = []        # Unused for now but might add to analysis later
@@ -140,8 +147,8 @@ class FLTrustStrategy(FedAvg):
         for _, fit_result in results:
             parameters = parameters_to_ndarrays(fit_result.parameters)
             # Flatten all parameters into one vector
-            flattened = np.concatenate([p.flatten() for p in parameters])
-            client_updates.append(flattened)
+            client_flattened = np.concatenate([p.flatten() for p in parameters])
+            client_updates.append(client_flattened - global_flattened)
             num_samples.append(fit_result.num_examples)
 
         # Compute trust scores
