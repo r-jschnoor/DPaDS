@@ -17,9 +17,9 @@ from src.server import run_simulation_with_config
 # Shared parameters across all experiments
 SHARED_PARAMS = dict(
     num_clients = 15,
-    num_rounds = 50,
+    num_rounds = 25,
     num_byzantine = 3,
-    root_dataset_size = 800,
+    root_dataset_size = 600,
     rescale_to_ref_norm = False,
 )
 

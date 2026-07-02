@@ -262,7 +262,7 @@ def get_client_fn(train_dataset, test_dataset, num_clients,
         if client_id < num_byzantine:
             return LabelFlipClient(
                 client_id, train_loader, test_loader,
-                source_label=7, target_label=1,
+                source_label=3, target_label=7,
                 use_dp=use_dp, epsilon=epsilon,
                 use_topk=use_topk, topk_ratio=topk_ratio,
                 num_rounds=num_rounds,

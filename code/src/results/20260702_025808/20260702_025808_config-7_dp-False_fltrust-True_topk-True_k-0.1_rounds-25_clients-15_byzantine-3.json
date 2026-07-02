@@ -1,0 +1,346 @@
+{
+  "config": {
+    "config_id": 7,
+    "num_clients": 15,
+    "num_rounds": 25,
+    "num_byzantine": 3,
+    "use_dp": false,
+    "epsilon": 10.0,
+    "delta": 1e-05,
+    "use_fltrust": true,
+    "use_topk": true,
+    "topk_ratio": 0.1,
+    "root_dataset_size": 600,
+    "rescale_to_ref_norm": false
+  },
+  "results": {
+    "elapsed_seconds": 370.653724193573,
+    "noise_multiplier": null,
+    "confusion_matrix": [
+      [
+        0,
+        980,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1135,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1032,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1010,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        982,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        892,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        958,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1028,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        974,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1009,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "per_class_scores": {
+      "0": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "1": {
+        "precision": 0.1135,
+        "recall": 1.0,
+        "f1": 0.2039
+      },
+      "2": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "3": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "4": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "5": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "6": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "7": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "8": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "9": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      }
+    },
+    "per_round": [
+      {
+        "round": 1,
+        "loss": 2.3024243744798363,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 2,
+        "loss": 2.3022869920578244,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 3,
+        "loss": 2.3022996914653353,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 4,
+        "loss": 2.3022963817888935,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 5,
+        "loss": 2.302300095939027,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 6,
+        "loss": 2.3022973750726865,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 7,
+        "loss": 2.3022997371685774,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 8,
+        "loss": 2.302296771028171,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 9,
+        "loss": 2.3023008431870338,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 10,
+        "loss": 2.302295755654478,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 11,
+        "loss": 2.3023013261179575,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 12,
+        "loss": 2.3022953070009855,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 13,
+        "loss": 2.3022994210544865,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 14,
+        "loss": 2.3022954303997394,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 15,
+        "loss": 2.3022997325982524,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 16,
+        "loss": 2.3022969500325354,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 17,
+        "loss": 2.3022999801574806,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 18,
+        "loss": 2.3022967481765506,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 19,
+        "loss": 2.3022973575531105,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 20,
+        "loss": 2.302298963260346,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 21,
+        "loss": 2.3022955058100885,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 22,
+        "loss": 2.3022975479832852,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 23,
+        "loss": 2.3022969340364012,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 24,
+        "loss": 2.3022989251743105,
+        "accuracy": 0.1135,
+        "epsilon": null
+      },
+      {
+        "round": 25,
+        "loss": 2.3022964480585943,
+        "accuracy": 0.1135,
+        "epsilon": null
+      }
+    ]
+  }
+}
