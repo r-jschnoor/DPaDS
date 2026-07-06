@@ -56,7 +56,7 @@
 		\acro{DP}{Differential Privacy}
 	\end{acronym}
 	
-	% --------------------------------------------------
+% --------------------------------------------------
 	\section{Introduction}
 	% --------------------------------------------------
 	
@@ -69,24 +69,14 @@
 	}
 	
 	\subsection{Background and Motivation}
-	\placeholder{%
-		Expand: why FL matters (distributed training without data centralization; healthcare,
-		finance, mobile); unique threat surface (gradient poisoning, membership inference);
-		why protection is non-trivial; cite~\cite{mcmahan2017fedavg,abadi2016deep}.%
-	}
 	
 	In the past ten years, \ac{FL} has emerged as a framework for achieving distributed training without the need for data centralization. This is of particular interest when processing sensitive data, such as in healthcare or mobile applications. The local training allows to leave the data with the clients but opens new attack surfaces for model poisoning during training through the transmission of manipulated updates. Also, the transmitted gradients can still leak information about the used training data set. Additionally, gradient transmission at each round causes significant communication cost, especially for complex models.
 	
-	In an effort to fortify the resilience of models and safeguard client privacy, numerous methodologies have been implemented in recent years. Robustness-enhancing methods are designed to detect malicious updates by assuming a significant deviation from the honest majority. Privacy-preserving algorithms add a mask or calibrated noise to the local updates before transmitting them to the central server.
+	In an effort to fortify the resilience of models and safeguard client privacy, numerous methodologies have been implemented in recent years. 
+	Robustness-enhancing methods are designed to detect malicious updates by assuming a significant deviation from the honest majority. 
+	Privacy-preserving algorithms add a mask or calibrated noise to the local updates before transmitting them to the central server.
 	
 	\subsection{Problem Statement}
-	
-	\placeholder{%
-		Formalize the trilemma: individual costs of privacy (DP noise), robustness
-		(aggregation distortion), and efficiency (compression loss); the key observation
-		that combining mechanisms yields super-additive accuracy cost; gap between
-		theoretical lower bound \cite{allouah2023trilemma} and current implementations.%
-	}
 	
 	Ensuring model robustness and client privacy while balancing communication cost and model accuracy has been identified as a significant challenge.
 	Adding privacy-enhancing noise to individual updates reduces a malicious server's ability to extract information about local datasets, while simultaneously reducing model accuracy.
@@ -151,13 +141,8 @@
 	\section{Background}
 	\label{sec:background}
 	% --------------------------------------------------
-	
+	This chapter summarizes the theoretical background of \ac{FL}, the trilemma axes and formalizes the Privacy-Robustness-Performance trilemma.
 	\subsection{Federated Learning}
-	
-	\placeholder{%
-		FedAvg~\cite{mcmahan2017fedavg}: global model, local SGD, aggregation.
-		IID vs.\ non-IID data; communication rounds; client sampling. Image/graphic here?%
-	}
 	
 	Federated Learning is a machine learning framework comprising a central server and multiple distributed clients. Each client maintains a
 	local dataset to compute updates for the global model. The central server orchestrates the training process by distributing the current
@@ -167,14 +152,10 @@
 	the global update as a weighted average of the client-local model updates.
 	
 	\subsection{Privacy: \ac{DP}}
+	This chapter introduces the concept of \ac{DP} and the Byzantine Fault Model.
 	
 	\subsubsection{Definition and Composition}
-	
-	\placeholder{%
-		$(\epsilon,\delta)$-DP definition; sensitivity; Gaussian mechanism;
-		composition theorems; Rényi DP~\cite{Mironov_2017} for tighter accounting.%
-	}
-	
+
 	\ac{DP} forms a good standard for privacy guarantees for algorithms used in data aggregation. Its degree of protection is defined by the privacy budget $\varepsilon$ and the failure probability $\delta$. We use the definition given by Abadi et al.~\cite{abadi2016deep}.
 	
 \begin{definition}
@@ -191,12 +172,6 @@
 	
 	\subsubsection{\ac{DP-SGD}}
 	
-	\placeholder{%
-		Per-sample gradient clipping to bound $\ell_2$-sensitivity;
-		calibrated noise addition; privacy amplification by sampling;
-		Opacus accountant~\cite{yousefpour2021opacus}.%
-	}
-	
 	\ac{DP-SGD} is a modification to the standard \ac{SGD} algorithm introduced by Abadi et al.~\cite{abadi2016deep} in 2016 to integrate \ac{DP} into deep learning frameworks. It enhances \ac{SGD} by clipping the computed gradient to a fixed norm and adding calibrated (Gaussian) noise before performing an update step. The algorithm pseudocode as proposed by Abadi et al. is shown in figure \ref{fig:dpsgdpseudocode}.
 	
 	\begin{figure}
@@ -206,63 +181,36 @@
 	\end{figure}
 	
 	\subsubsection{Central vs.\ Local \ac{DP} in FL}
+	\placeholder{review}
 	
-	\placeholder{%
-		Central DP: noise at server post-aggregation.
-		Local DP: noise at each client before upload.
-		Trade-offs in trust model and effective noise magnitude.%
-	}
+	Central DP is applied by the server by adding noise after the aggregation. This is used in settings where the aggregator is trusted, but updates need to be masked before sharing them with third parties.
 	
-	Central \ac{DP} is applied by the server by adding noise after the aggregation. //TODO Threat model and applications
-	
-	In our case, the local updates are to be protected from inference attacks, requiring local \ac{DP}. This is achieved by each client adding the noise locally before sharing the updates. The effective noise magnitude increases in this case //TODO numbers, reference!!
+	In our case, the local updates are to be protected from inference attacks by the aggregator or attackers eavesdropping on the client-server-communication, requiring local \ac{DP}. This is achieved by each client adding the noise locally before sharing the updates. The effective noise magnitude increases in this case because the masks on the individual updates add up, making local \ac{DP} more costly in terms of accuracy.
 	
 	\subsection{Robustness: Byzantine-Tolerant Aggregation}
 	
 	\subsubsection{Byzantine Fault Model}
+	Byzantine Fault Tolerance is a property of a distributed system that allows for the system to stay operational while some components fail or act maliciously.
 	
-	\placeholder{%
-		Definition of $\eta$-fraction Byzantine adversary; threat capabilities
-		(arbitrary gradient manipulation); impossibility results without redundancy.%
-	}
-	
-	A $\eta$-fraction Byzantine adversary means that $\eta$\% of the clients are communicating manipulated gradients to poison the central model, e.g. insert a backdoor, degrade the general performance or enable label flipping attacks.
+	A $\eta$-fraction Byzantine adversary means that $\eta$\% of the clients are acting maliciously. In the conducted experiments, malicious behavior means communicating manipulated gradients to poison the central model, e.g. insert a backdoor, degrade the general performance or enable label flipping attacks.
 	
 	\subsubsection{Krum}
-	
-	\placeholder{%
-		Blanchard et al.~\cite{Krum}: selects update closest to its
-		$n-f-2$ neighbors; provably Byzantine-tolerant but accuracy-limited under
-		heterogeneity.%
-	}
 	
 	Krum~\cite{Krum}, proposed by Blanchard et al. in 2017, enhances robustness to Byzantine adversaries by selecting updates closest to their XX neighbors, effectively focusing on the densest cluster of updates of size XX. This ensures the training process is provably Byzantine-tolerant but relies on the assumption that honest updates cluster together, which only holds when data distributions across clients are similar. Under data heterogeneity, this assumption breaks down, leading to performance degradation because honest updates may be discarded if they deviate significantly from the majority.
 	
 	\subsubsection{FLTrust}
 	
-	\placeholder{%
-		Cao et al.~\cite{cao2021fltrust}: server holds small root dataset; cosine
-		similarity-based trust scores clip client contributions;
-		advantages under data heterogeneity.%
-	}
-	
-	FLTrust~\cite{cao2021fltrust} mitigates malicious updates by maintaining a small root dataset on the server, which is used to compute an
-	update anchor at each training round. Client updates are then weighted based on their cosine similarity to this anchor. The method relies
-	on the assumption that the server has access to a dataset representing the general data distribution across all clients.
-	
+	FLTrust~\cite{cao2021fltrust} was introduced by Cao et al. in 2020 and mitigates malicious updates through trust scores. These are obtained by calculating the cosine similarity of the local update to an update anchor computed on a small root dataset held by the server. The method relies on the assumption that the server has access to a dataset representing the general data distribution across all clients.
 	
 	\subsection{Performance: Communication Efficiency}
+	Another practical limitation especially in mobile applications is the available bandwidth to transmit local updates to the aggregator. We therefore include a method to communicate sparse instead of dense updates.
 	
 	\subsubsection{Top-$k$ Gradient Sparsification}
-	
-	\placeholder{%
-		Transmit only $k$ largest gradient components~\cite{aji2017topk};
-		error feedback; interaction with clipping.
-		$k$ as fraction of dimension $d$.%
-	}
-	
+\placeholder{review}
+
 	Top-$k$ gradient sparsification~\cite{aji2017topk} is a technique to reduce communication while uploading the gradients by only transmitting the $k$ largest gradient components where $k$ is a fixed fraction of the model dimension $d$.
-	//TODO effects on performance
+	
+	This naturally degrades performance depending on the information distribution within the gradients. Models that allow for precise decisions along few axes are less affected than more complex ones that rely heavily on inter-dimensional relations.
 	
 	\subsubsection{Relation to Model Dimensionality}
 	
@@ -283,7 +231,7 @@
 	}
 	
 	Allouah et al.~\cite{allouah2023trilemma} showed that any algorithm guaranteeing
-	$\epsilon$-local \ac{DP} and robustness against an $\eta$-fraction Byzantine adversary incurs a mean-estimation error of at least
+	$\epsilon$-local DP and robustness against an $\eta$-fraction Byzantine adversary incurs a mean-estimation error of at least
 	$\Omega\!\left(\frac{\eta}{\epsilon^2} + \frac{d}{\epsilon^2 n} + \eta G^2\right)$.
 	
 	The cross-term $\eta/\epsilon^2$ shows that the cost for privacy and robustness interact multiplicative instead of additive.
@@ -307,17 +255,11 @@
 	\section{Threat Model and Metrics}
 	\label{sec:threat}
 	% --------------------------------------------------
+	This chapter maps out the assumed threat model and introduces the metrics used to evaluate the three axes.
 	
 	\subsection{Threat Model}
 	
-	\placeholder{%
-		Adversary fraction $\eta$; Byzantine capability (arbitrary gradients);
-		label-flipping attack (Fang et al.~\cite{fang2020poisoning}) as concrete
-		instantiation; honest-but-curious server (motivates DP);
-		no collusion between Byzantine clients and passive server.%
-	}
-	
-	We assume an honest-but-curious central server that adheres to protocol specifications but may attempt to infer private information from transmitted updates, motivating the use of \ac{DP} to safeguard client data. The adversary is characterized by a fraction $\eta$ of malicious clients, capable of arbitrarily manipulating gradients (e.g., through label-flipping attacks, as formalized in Fang et al.~\cite{fang2020poisoning}). These clients aim to corrupt the global model by injecting adversarial updates. Crucially, we assume no collusion between Byzantine clients and the server, restricting adversarial behavior to local manipulations of gradients. This assumption simplifies the analysis while maintaining practical relevance for decentralized learning systems.
+	We assume an honest-but-curious central server that adheres to protocol specifications but may attempt to infer private information from transmitted updates, motivating the use of differential privacy (DP) to safeguard client data. The adversary is characterized by a fraction $\eta$ of malicious clients, capable of arbitrarily manipulating gradients (e.g., through label-flipping attacks, as formalized in Fang et al.~\cite{fang2020poisoning}). These clients aim to corrupt the global model by injecting adversarial updates. Crucially, we assume no collusion between Byzantine clients and the server, restricting adversarial behavior to local manipulations of gradients. This assumption simplifies the analysis while maintaining practical relevance for decentralized learning systems.
 	
 	\subsection{Evaluation Metrics}
 	\label{sec:metrics}
@@ -325,28 +267,15 @@
 	As suggested by Allouah et al.~\cite{allouah2023balancing}, every configuration is evaluated simultaneously across all three trilemma axes:
 	
 	\paragraph{Privacy.}
-	\placeholder{%
-		Accumulated $(\epsilon,\delta)$-DP budget after $T$ rounds (Rényi accountant);
-		membership inference attack success rate (shadow model baseline).%
-	}
 	
-	The privacy objective is quantified by the accumulated $(\epsilon,\delta)$-\ac{DP} budget after $T$ rounds, tracked using the Rényi accountant~\cite{mironov2019rényi}. Additionally, the vulnerability to membership inference attacks is assessed by measuring the success rate of such attacks against a shadow model baseline~\cite{song2019membership}.
+	The privacy objective is quantified by the accumulated $(\epsilon,\delta)$-differential privacy (DP) budget after $T$ rounds, tracked using the Rényi accountant~\cite{mironov2019rényi}. Additionally, the vulnerability to membership inference attacks is assessed by measuring the success rate of such attacks against a shadow model baseline~\cite{song2019membership}.
 	
 	\paragraph{Robustness.}
-	\placeholder{%
-		Attack success rate (ASR) under label-flipping;
-		accuracy gap $\Delta\text{acc}$ vs.\ clean FedAvg.%
-	}
 	
 	Robustness is evaluated by the attack success rate (ASR) under label-flipping attacks and the accuracy gap $\Delta_{acc}$ relative to a clean FedAvg baseline. The accuracy gap captures untargeted performance degradation caused by adversarial clients, providing a measure of resilience to Byzantine behavior.
 	
 	\paragraph{Performance.}
-	\placeholder{%
-		Test accuracy on held-out data;
-		bytes per client per round (communication cost);
-		wall-clock training time.%
-	}
-	
+
 	The performance metric includes test accuracy on held-out data, communication cost (bytes sent per client per round), and wall-clock training time. These metrics collectively assess the trade-off between model utility, resource efficiency, and computational feasibility in decentralized learning systems.
 	
 	\subsection{Trilemma Visualization}
@@ -398,7 +327,7 @@
 		\label{fig:fltrustupdate}
 	\end{figure*}
 	
-	\subsection{Performance Mechanism: Top-$k$ Sparsification}
+\subsection{Performance Mechanism: Top-$k$ Sparsification}
 	
 	\placeholder{%
 		Fraction $k \in \{1\%, 10\%\}$ of $d$ transmitted per round;
@@ -408,7 +337,7 @@
 	}
 	
 	
-	\subsection{Mechanism Interaction Effects}
+\subsection{Mechanism Interaction Effects}
 	\label{sec:interaction}
 	
 	\placeholder{%
@@ -601,7 +530,7 @@
 	
 	The experiments in this project were conducted under several simplifications to provide a lightweight anchor for future research. The datasets and models selected offer good comparability with existing work but may not fully represent the data analyzed in practical \ac{FL} applications (e.g., financial or medical domains) or complex architectures (e.g., transformer-like models). 
 	
-	Furthermore, we evaluated only a single method at most one attack type per axis. The baseline for membership inference attack success rate was approximated using a shadow model, and the privacy budget was constrained to a limited $\varepsilon$-grid to balance computational feasibility with analytical rigor. Additionally, the privacy budget was spent uniformly over time, but recent research by Kiani et al.~\cite{kiani2025differentiallyprivatefederatedlearning} suggests that a time-adaptive approach yields better privacy-utility-tradeoffs.
+	Furthermore, we evaluated only a single method and at most one attack type per axis. The baseline for membership inference attack success rate was approximated using a shadow model, and the privacy budget was constrained to a limited $\varepsilon$-grid to balance computational feasibility with analytical rigor. Additionally, the privacy budget was spent uniformly over time, but recent research by Kiani et al.~\cite{kiani2025differentiallyprivatefederatedlearning} suggests that a time-adaptive approach yields better privacy-utility-tradeoffs.
 	
 	\subsection{Future Work}
 	
