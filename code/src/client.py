@@ -147,16 +147,8 @@ class MnistClient(fl.client.NumPyClient):
             loss.backward()
             opt_tmp.step()
 
-        if self.use_dp and self.noise_multiplier is not None:
-            self.model.load_state_dict(model_tmp._module.state_dict())
-
-        metrics = {}
-        if self.use_dp and self.privacy_engine is not None:
-            metrics["epsilon"] = get_privacy_spent(self.privacy_engine, self.delta)
-            metrics[ACCOUNTANT_STATE_KEY] = serialize_accountant_state(self.privacy_engine)
-            metrics["noise_multiplier"] = self.noise_multiplier
-
         updated_parameters = self.get_parameters(config={})
+        metrics = {}
 
         if self.use_topk:
             # Compute update -> weights now - global weights
@@ -179,6 +171,14 @@ class MnistClient(fl.client.NumPyClient):
             
             sparsity = np.count_nonzero(sparsified_update) / len(sparsified_update)
             metrics["topk_sparsity"] = sparsity
+
+
+        if self.use_dp and self.noise_multiplier is not None:
+            self.model.load_state_dict(model_tmp._module.state_dict())
+        if self.use_dp and self.privacy_engine is not None:
+            metrics["epsilon"] = get_privacy_spent(self.privacy_engine, self.delta)
+            metrics[ACCOUNTANT_STATE_KEY] = serialize_accountant_state(self.privacy_engine)
+            metrics["noise_multiplier"] = self.noise_multiplier
 
         return updated_parameters, len(self.train_loader.dataset), metrics
     

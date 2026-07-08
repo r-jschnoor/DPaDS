@@ -82,18 +82,9 @@ class LabelFlipClient(MnistClient):
             loss = self.loss_fn(outputs, labels)
             loss.backward()
             opt_tmp.step()
-            
-        if self.use_dp and self.noise_multiplier is not None:
-            self.model.load_state_dict(model_tmp._module.state_dict())
 
-        metrics = {}
-        if self.use_dp and self.privacy_engine is not None:
-            metrics["epsilon"]           = get_privacy_spent(self.privacy_engine, self.delta)
-            metrics[ACCOUNTANT_STATE_KEY] = serialize_accountant_state(self.privacy_engine)
-            metrics["noise_multiplier"]  = self.noise_multiplier
-
-        
         updated_parameters = self.get_parameters(config={})
+        metrics = {}
 
         if self.use_topk:
             flat_before = np.concatenate([p.flatten() for p in parameters])
@@ -109,5 +100,13 @@ class LabelFlipClient(MnistClient):
                 updated_parameters.append(sparse_params[index:index+size].reshape(shape))
                 index += size
             metrics["topk_sparsity"] = np.count_nonzero(sparse_update) / len(sparse_update)
+            
+        if self.use_dp and self.noise_multiplier is not None:
+            self.model.load_state_dict(model_tmp._module.state_dict())
+
+        if self.use_dp and self.privacy_engine is not None:
+            metrics["epsilon"]           = get_privacy_spent(self.privacy_engine, self.delta)
+            metrics[ACCOUNTANT_STATE_KEY] = serialize_accountant_state(self.privacy_engine)
+            metrics["noise_multiplier"]  = self.noise_multiplier
 
         return self.get_parameters(config={}), len(self.train_loader.dataset), metrics
