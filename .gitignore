@@ -39,5 +39,6 @@
 
 
 .venvD/
+.venv/
 CLAUDE.md
 .claude

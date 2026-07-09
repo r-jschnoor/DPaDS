@@ -20,10 +20,10 @@ RESULTS_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__f
 
 # Shared parameters across all experiments
 SHARED_PARAMS = dict(
-    num_clients = 15,
-    num_rounds = 10,
-    num_byzantine = 3,
-    root_dataset_size = 600,
+    num_clients = 100,
+    num_rounds = 100,
+    num_byzantine = 20,
+    root_dataset_size = 200,
     rescale_to_ref_norm = False,
     seed = 42,  # Same data split + initial model across a config sweep, so
                 # only the parameter actually variy (epsilon, topk_ratio,
