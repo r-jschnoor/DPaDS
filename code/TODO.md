@@ -4,6 +4,10 @@
 - Implement CIFAR-10
 - BLADES validation
 
+- Byzantine clients random contributions
+- huge contributions
+- training time logging
+
 - Sample set of server needs to be representative (each labels needs to be there) -!-
 - Currently server trains ref dataset on clients_round+1 -> Slight derivation on gradient
 
