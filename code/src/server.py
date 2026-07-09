@@ -1,21 +1,23 @@
 from re import U
 
 import flwr as fl
-from flwr.common import FitIns
+from flwr.common import FitIns, ndarrays_to_parameters
 from flwr.server import ServerApp, ServerConfig, ServerAppComponents
 from flwr.client import ClientApp
 from flwr.server.strategy import FedAvg
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, Subset
+from sklearn.model_selection import train_test_split
 import ray
 import os
 import warnings
 import logging
 
-from src.client import MnistClient
+from src.client import MnistClient, set_seed
 from src.experiment_config import ExperimentConfig
 from src.mechanisms.attacks import LabelFlipClient
 from src.mechanisms.robust_aggregation import FLTrustStrategy
+from src.models.mnist_cnn import MnistCNN
 
 
 # Env
@@ -44,6 +46,7 @@ ROOT_DATASET_SIZE           = 2000   # Sample count the server holds
 USE_RESCALE_TO_REF_NORM     = False  # Whether the server should normalize the clients gradients. Paper uses it but the available resources are not enough to mirror so its turned off for now. This is mostly to protect against malicious clients that send massive updates to gain an advantage to honest clients by size.
 USE_TOPK                    = True
 TOPK_RATIO                  = 0.1
+SEED                         = 42     # Reproducible model init + data split. None for unseeded.
 
 
 class HistoryStrategyAdapter:
@@ -74,6 +77,25 @@ class HistoryStrategyAdapter:
                 self.history["metrics_distributed_evaluate"][key].append((server_round, val))
         return loss, metrics
 
+    def evaluate(self, server_round, parameters):
+        """
+        Record centralized (server-side) evaluation results.
+
+        Called by Flower once per round when a strategy is built with
+        evaluate_fn. Separate from aggregate_evaluate() above, which records federated (per-client)
+        evaluation; the two write into the same history dict/keys so
+        save_results() doesn't need to know which one ran.
+        """
+        result = super().evaluate(server_round, parameters)
+        if result is None:
+            return None
+        loss, metrics = result
+        self.history["losses_distributed"].append((server_round, loss))
+        for key, val in metrics.items():
+            self.history["metrics_distributed_evaluate"].setdefault(key, [])
+            self.history["metrics_distributed_evaluate"][key].append((server_round, val))
+        return loss, metrics
+
     def aggregate_fit(self, server_round, results, failures):
         # First store accountant state per client
         if self.accountant_manager is not None:
@@ -94,22 +116,21 @@ class HistoryStrategyAdapter:
     
     def configure_fit(self, server_round, parameters, client_manager):
         """
-        Override to send per-client accountant state in config
+        Override to send per-client accountant state (and always
+        server_round, needed for each client's round-aware seeding) in
+        config.
         """
         # Get default instructions
         instructions = super().configure_fit(server_round, parameters, client_manager)
 
-        # No accountant manager -> Normal configure fit_is fine
-        if self.accountant_manager is None:
-            return instructions
-        
         # Replace config for each client with accountant state of client
+        # (or just server_round if DP/accountant tracking is disabled)
         updated = []
         for client_proxy, fit_ins in instructions:
-            config = {"server_round": server_round}
-            state = self.accountant_manager.get_state(client_proxy.node_id)
-            if state:
-                config["accountant_state"] = state
+            if self.accountant_manager is not None:
+                config = self.accountant_manager.get_config(client_proxy.node_id, server_round)
+            else:
+                config = {"server_round": server_round}
             updated.append((client_proxy, FitIns(fit_ins.parameters, config)))
 
         return updated
@@ -138,34 +159,34 @@ class AccountantStateManager:
     """
 
     def __init__(self):
-        self._state = {}        # client_id -> accountant_state JSON string
-    
-    
-    def store(self, client_id: int, accountant_state_json: str):
+        self._state = {}        # node_id -> accountant_state JSON string
+
+
+    def store(self, node_id: int, accountant_state_json: str):
         """
         Store accountant state for a client.
 
         Args:
-            client_id (int):  client identifier.
+            node_id (int):    the raw Flower node_id.
             state_json (str): serialized accountant state.
         """
-        self._state[client_id] = accountant_state_json
+        self._state[node_id] = accountant_state_json
 
-    
-    def get_config(self, client_id: int, server_round: int) -> dict:
+
+    def get_config(self, node_id: int, server_round: int) -> dict:
         """
         Build fit config for a client including its accountant's state.
 
         Args:
-            client_id (int):    client identifier.
+            node_id (int):       the raw Flower node_id.
             server_round (int): current round number.
 
         Returns:
             dict: config to pass to client's fit() via Flower.
         """
         config = {"server_round": server_round}
-        if client_id in self._state:
-            config["accountant_state"] = self._state[client_id]
+        if node_id in self._state:
+            config["accountant_state"] = self._state[node_id]
         return config
     
 
@@ -182,15 +203,27 @@ class AccountantStateManager:
         return self._state.get(node_id)
 
 
-def load_datasets(root_dataset_size):
+def load_datasets(root_dataset_size, seed=None):
     """
     Loader MNIST train/test datasets and create the server root loader.
 
+    The root set is a stratified sample (same class proportions as the
+    full training set) so every label is represented, and it is disjoint
+    from the indices clients draw from (see get_client_fn) so the server's
+    "clean" data is never a subset of any client's local data.
+
     Args:
         root_dataset_size (int): number of clean samples the server holds.
+        seed (int | None):       random seed for the root/client split. None
+                                 keeps the unseeded (different every run)
+                                 behavior; configs sharing the same seed get
+                                 the same split.
 
     Returns:
-        tuple: (train_dataset, test_dataset, root_loader)
+        tuple: (train_dataset, test_dataset, root_loader, client_pool_indices)
+            - client_pool_indices (list[int]): train_dataset indices not
+                                               used for the root set, for
+                                               clients to slice from.
     """
     transform = transforms.Compose([
         transforms.ToTensor(),
@@ -198,35 +231,83 @@ def load_datasets(root_dataset_size):
     ])
     train_dataset = datasets.MNIST(root="data/", train=True,  download=True, transform=transform)
     test_dataset  = datasets.MNIST(root="data/", train=False, download=True, transform=transform)
-    root_subset   = Subset(train_dataset, list(range(root_dataset_size)))
-    root_loader   = DataLoader(root_subset, batch_size=32, shuffle=True)
 
-    return train_dataset, test_dataset, root_loader
+    # Stratified split -> root_indices has every label represented in the
+    # same proportions as the full training set. client_pool_indices is
+    # everything left over. targets works the same way for CIFAR-10
+    # (plain list) as for MNIST (tensor).
+    targets = train_dataset.targets
+    if hasattr(targets, "tolist"):
+        targets = targets.tolist()
+    all_indices = list(range(len(train_dataset)))
+    root_indices, client_pool_indices = train_test_split(
+        all_indices, train_size=root_dataset_size, stratify=targets,
+        random_state=seed,
+    )
+
+    root_subset = Subset(train_dataset, root_indices)
+    root_loader = DataLoader(root_subset, batch_size=32, shuffle=True)
+
+    return train_dataset, test_dataset, root_loader, client_pool_indices
 
 
-def get_client_fn(train_dataset, test_dataset, num_clients,
-                  num_byzantine=0, use_dp=False, epsilon=10.0,
-                  use_topk=False, topk_ratio=0.1, num_rounds=1):
+def make_evaluate_fn(test_dataset):
+    """
+    Build a centralized (server-side) evaluate_fn for a Flower strategy.
+
+    Evaluates the global model once per round against the full test
+    dataset, replacing federated (per-client) evaluation -- every client
+    would otherwise evaluate on the same full test set against the same
+    global model and produce identical results, num_clients times over
+    for nothing. Reuses MnistClient.evaluate() via a throwaway client
+    instead of duplicating its accuracy/confusion-matrix logic.
+
+    Args:
+        test_dataset: full MNIST test dataset.
+
+    Returns:
+        function: evaluate_fn(server_round, parameters, config) -> (loss, metrics),
+                 the shape a Flower Strategy's evaluate_fn is expected to have.
+    """
+    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+    eval_client = MnistClient(client_id=-1, train_loader=None, test_loader=test_loader)
+
+    def evaluate_fn(server_round, parameters, config):
+        loss, _, metrics = eval_client.evaluate(parameters, {})
+        return loss, metrics
+
+    return evaluate_fn
+
+
+def get_client_fn(train_dataset, client_pool_indices, num_clients,
+                  num_byzantine=0, use_dp=False, epsilon=10.0, delta=1e-5,
+                  use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None):
     """
     Returns a function that creates a client with it own data slice.
 
     Flower calls this functions once per client per round. Each
-    client gets a unique slice of the training data, simulating real 
+    client gets a unique slice of the training data, simulating real
     FL where each device has its own local dataset.
 
     The first num_byzantine clients are malicious LabelFlipClients,
-    the rest are honest MnistClients.
+    the rest are honest MnistClients. Evaluation is centralized on the
+    server (see make_evaluate_fn), so clients don't need test data.
 
     Args:
         train_dataset:           full MNIST training dataset.
-        test_dataset:            full MNIST test dataset.
+        client_pool_indices (list[int]): train_dataset indices clients may
+                                         draw from (excludes the server's
+                                         root dataset, see load_datasets).
         num_clients (int):       total number of simulated clients.
         num_byzantine (int):     how many clients are malicious.
         use_dp (bool):           whether to wrap training with DP-SGD.
         epsilon (float):         privacy budget. Only used when use_dp=True.
+        delta (float):           privacy failure probability. Only used when use_dp=True.
         use_topk (bool):         whether to use top-k algorithm or not.
         topk_ratio (float):      the ratio of kept top-k values.
         num_rounds (int):        number of training rounds (each with 1 epoch) planned
+        seed (int | None):       random seed for reproducible model init and per-round training
+                                 randomness. None keeps the unseeded (different every run) behavior.
 
     Returns:
         function: client_fn(context) -> flwr.client.Client
@@ -241,49 +322,57 @@ def get_client_fn(train_dataset, test_dataset, num_clients,
 
         Args:
             context (flwr.common.Context): Flower context object containing
-                                        node_id and other runtime info.
-                                        Provided automatically by Flower.
+                                        node_id, node_config, and other
+                                        runtime info. Provided automatically
+                                        by Flower.
 
         Returns:
             flwr.client.Client: configured MnistClient for this node.
         """
-        # Give each client an equal slice of the training data
-        client_id = int(context.node_id) % num_clients
-        total = len(train_dataset)
+        # Give each client an equal slice of the training data. Use Flower's
+        # own partition-id (stable, sequential, collision-free) rather than
+        # node_id % num_clients -- node_id is an effectively-random large
+        # integer, so taking it mod a small num_clients can collide (two
+        # different physical clients landing on the same client_id, leaving
+        # another client_id completely unused that run).
+        client_id = context.node_config["partition-id"]
+        total = len(client_pool_indices)
         slice_size = total // num_clients
         start = client_id * slice_size
         end = start + slice_size
 
-        client_train = Subset(train_dataset, list(range(start, end)))
+        client_train = Subset(train_dataset, client_pool_indices[start:end])
         train_loader = DataLoader(client_train, batch_size=32, shuffle=True)
-        test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+        # Evaluation is centralized on the server (see make_evaluate_fn) --
+        # clients no longer need their own test_loader.
 
         # First num_byzantine clients are malicious
         if client_id < num_byzantine:
             return LabelFlipClient(
-                client_id, train_loader, test_loader,
+                client_id, train_loader, test_loader=None,
                 source_label=3, target_label=7,
-                use_dp=use_dp, epsilon=epsilon,
+                use_dp=use_dp, epsilon=epsilon, delta=delta,
                 use_topk=use_topk, topk_ratio=topk_ratio,
-                num_rounds=num_rounds,
+                num_rounds=num_rounds, seed=seed,
             ).to_client()
-        
+
         return MnistClient(
-            client_id, train_loader, test_loader,
-            use_dp=use_dp, epsilon=epsilon,
+            client_id, train_loader, test_loader=None,
+            use_dp=use_dp, epsilon=epsilon, delta=delta,
             use_topk=use_topk, topk_ratio=topk_ratio,
-            num_rounds=num_rounds,
+            num_rounds=num_rounds, seed=seed,
         ).to_client()
     
     return client_fn
 
 
-def get_server_fn(root_loader, use_rescale_to_ref_norm, use_fltrust, num_clients, num_rounds):
+def get_server_fn(root_loader, test_dataset, use_rescale_to_ref_norm, use_fltrust, num_clients, num_rounds):
     """
     Return a function that creates a ServerComponents object.
 
     Args:
         root_loader (DataLoader): small clean server-held dataset.
+        test_dataset:             full MNIST test dataset, for centralized evaluation.
         use_fltrust (bool):       whether to use FLTrust or plain FedAvg.
         num_clients (int):        total number of clients.
         num_rounds (int):         number of FL rounds.
@@ -301,11 +390,20 @@ def get_server_fn(root_loader, use_rescale_to_ref_norm, use_fltrust, num_clients
         Returns:
             ServerAppComponents: strategy and config bundled for Flower.
         """
+        evaluate_fn = make_evaluate_fn(test_dataset)
+
+        # Clients need server_round in their fit config for round-aware
+        # seeding (see client.py set_seed usage).
+        on_fit_config_fn = lambda server_round: {"server_round": server_round}
+
         if use_fltrust:
             aggregation_strategy = FLTrustStrategy(
                 root_loader=root_loader,
                 rescale_to_ref_norm=use_rescale_to_ref_norm,
                 fraction_fit=1.0,
+                fraction_evaluate=0.0,           # Skip federated eval -- evaluate_fn does it centrally instead
+                evaluate_fn=evaluate_fn,
+                on_fit_config_fn=on_fit_config_fn,
                 min_available_clients=num_clients,
                 fit_metrics_aggregation_fn=weighted_average_metrics,
                 evaluate_metrics_aggregation_fn=weighted_average_metrics,
@@ -314,6 +412,9 @@ def get_server_fn(root_loader, use_rescale_to_ref_norm, use_fltrust, num_clients
             # FedAvg strategy -> Aggregates client weights by weighted average
             aggregation_strategy = FedAvg(
                 fraction_fit=1.0,               # Use 100% of clients each round
+                fraction_evaluate=0.0,          # Skip federated eval -- evaluate_fn does it centrally instead
+                evaluate_fn=evaluate_fn,
+                on_fit_config_fn=on_fit_config_fn,
                 min_available_clients=num_clients,
                 fit_metrics_aggregation_fn=weighted_average_metrics,
                 evaluate_metrics_aggregation_fn=weighted_average_metrics,
@@ -321,7 +422,7 @@ def get_server_fn(root_loader, use_rescale_to_ref_norm, use_fltrust, num_clients
 
         config = ServerConfig(num_rounds=num_rounds)
         return ServerAppComponents(strategy=aggregation_strategy, config=config)
-    
+
     return server_fn
 
 
@@ -366,7 +467,10 @@ def run_simulation_with_config(config: ExperimentConfig):
     Returns:
         flwr History object containing per-round metrics.
     """
-    train_dataset, test_dataset, root_loader = load_datasets(config.root_dataset_size)
+    if config.seed is not None:
+        set_seed(config.seed)
+
+    train_dataset, test_dataset, root_loader, client_pool_indices = load_datasets(config.root_dataset_size, seed=config.seed)
 
     # Track history
     run_history = {
@@ -378,6 +482,19 @@ def run_simulation_with_config(config: ExperimentConfig):
     # Shared state manager to persist states across rounds
     accountant_manager = AccountantStateManager() if config.use_dp else None
 
+    evaluate_fn = make_evaluate_fn(test_dataset)
+
+    # Without a seed, Flower asks a random client for the initial global
+    # model (Server._get_initial_parameters -> ClientManager.sample(),
+    # which runs on a background thread and races with other threading, so
+    # it can't be pinned down by seeding alone). With a seed, build the
+    # initial model here instead so Flower skips that step entirely and
+    # uses exactly this.
+    initial_parameters = None
+    if config.seed is not None:
+        initial_ndarrays = [val.cpu().numpy() for _, val in MnistCNN().state_dict().items()]
+        initial_parameters = ndarrays_to_parameters(initial_ndarrays)
+
     # Strategies with tracking
     if config.use_fltrust:
         strategy = TrackingFLTrust(
@@ -386,6 +503,9 @@ def run_simulation_with_config(config: ExperimentConfig):
             root_loader=root_loader,
             rescale_to_ref_norm=config.rescale_to_ref_norm,
             fraction_fit=1.0,
+            fraction_evaluate=0.0,           # Skip federated eval -- evaluate_fn does it centrally instead
+            evaluate_fn=evaluate_fn,
+            initial_parameters=initial_parameters,
             min_available_clients=config.num_clients,
             fit_metrics_aggregation_fn=weighted_average_metrics,
             evaluate_metrics_aggregation_fn=weighted_average_metrics,
@@ -395,6 +515,9 @@ def run_simulation_with_config(config: ExperimentConfig):
             history=run_history,
             accountant_manager=accountant_manager,
             fraction_fit=1.0,
+            fraction_evaluate=0.0,           # Skip federated eval -- evaluate_fn does it centrally instead
+            evaluate_fn=evaluate_fn,
+            initial_parameters=initial_parameters,
             min_available_clients=config.num_clients,
             fit_metrics_aggregation_fn=weighted_average_metrics,
             evaluate_metrics_aggregation_fn=weighted_average_metrics,
@@ -410,11 +533,11 @@ def run_simulation_with_config(config: ExperimentConfig):
 
     client_app = ClientApp(
         client_fn=get_client_fn(
-            train_dataset, test_dataset,
+            train_dataset, client_pool_indices,
             config.num_clients, config.num_byzantine,
-            use_dp=config.use_dp, epsilon=config.epsilon,
+            use_dp=config.use_dp, epsilon=config.epsilon, delta=config.delta,
             use_topk=config.use_topk, topk_ratio=config.topk_ratio,
-            num_rounds=config.num_rounds
+            num_rounds=config.num_rounds, seed=config.seed,
         )
     )
     server_app = ServerApp(server_fn=server_fn)
@@ -434,15 +557,15 @@ def run_simulation_with_config(config: ExperimentConfig):
 
 
 if __name__ == "__main__":
-    train_dataset, test_dataset, root_loader = load_datasets(ROOT_DATASET_SIZE)
+    train_dataset, test_dataset, root_loader, client_pool_indices = load_datasets(ROOT_DATASET_SIZE, seed=SEED)
 
-    server_app = ServerApp(server_fn=get_server_fn(root_loader, USE_RESCALE_TO_REF_NORM, USE_FLTRUST, NUM_CLIENTS, NUM_ROUNDS))
+    server_app = ServerApp(server_fn=get_server_fn(root_loader, test_dataset, USE_RESCALE_TO_REF_NORM, USE_FLTRUST, NUM_CLIENTS, NUM_ROUNDS))
     client_app = ClientApp(
         client_fn=get_client_fn(
-            train_dataset, test_dataset, NUM_CLIENTS,
+            train_dataset, client_pool_indices, NUM_CLIENTS,
             NUM_BYZANTINE_CLIENTS, use_dp=USE_DP,
             epsilon=EPSILON, use_topk=USE_TOPK,
-            topk_ratio=TOPK_RATIO,
+            topk_ratio=TOPK_RATIO, seed=SEED,
         )
     )
 

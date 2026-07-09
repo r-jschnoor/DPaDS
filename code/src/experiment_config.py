@@ -21,6 +21,11 @@ class ExperimentConfig:
         topk_ratio (float):      fraction of parameters to keep. Only used when use_topk=True.
         root_dataset_size (int): number of clean samples the server holds.
         rescale_to_ref_norm (bool): whether to rescale client updates to reference norm.
+        seed (int | None):      random seed for the root/client data split and each client's
+                                model init + per-round training randomness. None keeps the
+                                unseeded (different every run) behavior. Configs sharing the
+                                same seed get the same data split and initial global model,
+                                isolating whatever parameter differs between them.
     """
     config_id:          int
     num_clients:        int   = 4
@@ -34,3 +39,4 @@ class ExperimentConfig:
     topk_ratio:         float = 0.1
     root_dataset_size:  int   = 2000
     rescale_to_ref_norm: bool = False
+    seed:               int | None = None

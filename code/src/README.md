@@ -1,0 +1,302 @@
+# Code Directory
+
+## Found Bugs
+
+Results of an in-depth correctness review of the three trilemma mechanisms (DP, FLTrust, TopK) and
+the surrounding FL simulation code, verified against Opacus internals and the FLTrust paper's
+aggregation algorithm where relevant. Ordered by severity. Status is updated as items are fixed.
+
+### Critical
+
+1. **FLTrust aggregation dropped the base model** — `mechanisms/robust_aggregation.py`
+   (`FLTrustStrategy.aggregate_fit`). `client_updates` are deltas
+   (`client_flattened - global_flattened`); `aggregated_norms` is the trust-weighted average of
+   those deltas. The final step reshaped `aggregated_norms` directly into the new global model
+   instead of `global_flattened + aggregated_norms`, so every FLTrust round replaced the global
+   model with a small, near-noise vector rather than applying the aggregated update to it.
+   Confirmed empirically (15 clients, 3 Byzantine, 8 rounds, FLTrust only): before the fix,
+   accuracy flatlined at exactly `0.1135` on every single round; after adding the missing
+   `global_flattened` back, accuracy climbed `0.556 -> 0.624 -> 0.808 -> 0.868 -> 0.891 -> 0.904
+   -> 0.909 -> 0.917`. This was the actual root cause behind the previously flagged "Revisit trust
+   scores" TODO and every flatlined FLTrust result (with or without DP) — the trust-score math
+   itself was fine.
+   **Status: Fixed.**
+
+### High
+
+2. **Label-flip attack collapsed both classes instead of swapping them** —
+   `mechanisms/attacks.py` (`LabelFlipClient.fit`), lines with
+   `labels[labels == self.source_label] = self.target_label` followed by
+   `labels[labels == self.target_label] = self.source_label`. Sequential in-place masked
+   assignment: the first line turns all `source_label` samples into `target_label`, then the
+   second line's mask now also matches those just-converted samples, sending everything (both
+   original classes) to `source_label`. Verified directly:
+   `[1,2,3,4,5,6,7,8,9,0,3,7] -> [1,2,3,4,5,6,3,8,9,0,3,3]` for source=3, target=7. Not a true
+   swap and not the documented one-way "relabel source to target" behavior either — changed what
+   the Byzantine-robustness experiments were actually testing.
+   Confirmed intent was a true bidirectional swap (source and target labels exchange completely,
+   e.g. `3 <-> 7`). Fix: capture both boolean masks before mutating `labels`, then apply both
+   assignments against the original (unmutated) masks instead of re-deriving the second mask from
+   the already-mutated tensor. Verified directly:
+   `[1,2,3,4,5,6,7,8,9,0,3,7] -> [1,2,7,4,5,6,3,8,9,0,7,3]` for source=3, target=7 — correct swap,
+   other digits untouched. End-to-end sanity check (15 clients, 3 Byzantine, FLTrust, 3 rounds)
+   ran clean: accuracy `0.490 -> 0.673 -> 0.825`.
+   **Status: Fixed.**
+
+### Moderate
+
+3. **`ExperimentConfig.delta` is never passed to clients** — `server.py` (`get_client_fn`,
+   `run_simulation_with_config`). Neither `MnistClient` nor `LabelFlipClient` receive `delta` from
+   the config; both silently fall back to their own hardcoded default (`1e-5`). Invisible today
+   only because that happens to match `ExperimentConfig`'s default.
+   Fix: added `delta` to `LabelFlipClient.__init__` (forwarded to `MnistClient.__init__`, which
+   already accepted it) and threaded `delta` through `get_client_fn()` and
+   `run_simulation_with_config()` down to both client constructors.
+   **Status: Fixed.**
+
+4. **`total_trust == 0` fallback doesn't return the unchanged global model** —
+   `mechanisms/robust_aggregation.py` (`FLTrustStrategy.aggregate_fit`). The comment says "Return
+   unchanged global model," but `self.ref_model` has already been mutated by
+   `get_reference_update()` (trained one epoch on the small root set) by the time this branch
+   runs. Under an all-untrusted round, the model is silently replaced by a low-capacity,
+   root-set-only-trained model instead of being preserved.
+   Fix: return `server_state_parameters` (the actual pre-round global weights already saved in
+   `configure_fit`) instead of `self.ref_model`'s post-training parameters.
+   **Status: Fixed.**
+
+5. **DP noise-multiplier calibration silently depends on `dataset_size % batch_size == 0`** —
+   `client.py` / `mechanisms/attacks.py` (`__init__`) vs. Opacus internals. The manual
+   `sample_rate = batch_size / dataset_size` used to calibrate the noise multiplier only matches
+   Opacus's actual internal `1 / len(DataLoader)` (used for Poisson subsampling via
+   `DPDataLoader.from_data_loader`) when the client's dataset size divides evenly by batch size.
+   True today for the default config (15 clients -> 4000 samples/client, batch 32), but not
+   guaranteed for other client counts — would silently miscalibrate the noise multiplier relative
+   to the configured target epsilon otherwise. (The *reported* per-round epsilon stays accurate
+   since it's read from the real accountant history.)
+   Fix: compute `sample_rate = 1 / len(train_loader)` directly, matching Opacus's own internal
+   convention regardless of divisibility. `LabelFlipClient` inherits this via `super().__init__()`.
+   **Status: Fixed.**
+
+Combined sanity check for bugs 3-5 (`run_configurations.py --config 5`: DP+FLTrust, 3 Byzantine
+label-flippers, 15 clients, 10 rounds, epsilon in {1, 5, 10}) ran clean end to end — no crashes,
+and each variant shows real learning instead of the old flatlines: eps=1 accuracy
+`0.100 -> 0.392`, eps=5 `0.116 -> 0.395`, eps=10 `0.103 -> 0.471`, with each run's spent epsilon
+(from the real accountant) climbing smoothly to its target by round 10 (0.99 / 4.99 / 9.99).
+
+### Low / design notes
+(FW = Future Work)
+
+6. FW -> **No error-feedback / residual memory in TopK** — `mechanisms/topk.py`. Standard practice in
+   the compression literature (e.g. Deep Gradient Compression) to avoid permanently discarding
+   zeroed-out coordinates each round; likely contributes to worse results at high sparsity
+   (k=0.01).
+   Discussed: plain (memory-less) top-k is a legitimate baseline in its own right, not incorrect.
+   Adding memory would be a new feature (round-persistent per-client residual state, mirroring
+   `AccountantStateManager`) rather than a bug fix, and would change the meaning of every existing
+   TopK result.
+   **Status: Won't fix.** *Flagged as a **future improvement** — the introduction of round-persistent
+   client state (residual accumulation across rounds, in the same spirit as the DP accountant
+   state) is the interesting part worth revisiting later, not just the memory mechanism itself.*
+
+7. FW -> **`rescale_to_ref_norm` is off in every configured experiment** — hardcoded in
+   `scripts/run_configurations.py`'s `SHARED_PARAMS`. Without it, clients that do more local SGD
+   steps get proportionally larger raw influence on the aggregate regardless of trust score
+   (trust score normalizes the *weights*, not the update magnitude) — a real deviation from the
+   FLTrust paper worth documenting as a limitation rather than a silent default.
+   Re-tested now that bug 1 is fixed (15 clients, 3 Byzantine, 8 rounds, root=600):
+   `rescale_to_ref_norm=True` converges cleanly (`0.122 -> 0.149 -> 0.205 -> 0.270 -> 0.380 ->
+   0.479 -> 0.557 -> 0.616`) but noticeably slower than `False` (`0.556 -> ... -> 0.917` at the
+   same round count) — it isn't unstable, it's just a smaller effective step size. Root cause: the
+   server's reference model trains on only `root_dataset_size=600` samples per round (~19
+   batches) versus a client's ~4000 samples (~125 batches), so the reference update's norm is
+   systematically much smaller than a client's; rescaling every client down to that smaller norm
+   shrinks the effective global learning rate. This is the same root imbalance as bug 9.
+   **Status: Won't fix (for now).** Keeping the default off so existing/planned experiments stay
+   comparable. Worth revisiting once `root_dataset_size` is rebalanced against client dataset size
+   (see 9) — that's the actual lever to make paper-faithful rescaling converge at a competitive
+   rate, not a fix to the rescaling logic itself.
+
+8. **Server root dataset overlapped client 0's training slice and wasn't class-representative** —
+   both started from index 0 of the training set, so the "clean, independent" server data wasn't
+   actually independent from client 0 (always a malicious client under the current setup), and the
+   root set's class balance was whatever fell out of the raw dataset order (previously measured
+   49-79 samples per class out of 600).
+   Fix: `load_datasets()` now builds the root set via
+   `sklearn.model_selection.train_test_split(all_indices, train_size=root_dataset_size,
+   stratify=targets)`, which returns a class-balanced root sample and its complement in one call.
+   `get_client_fn()` now takes that complement (`client_pool_indices`) and slices clients from it
+   instead of `range(0, len(train_dataset))`, so root and client data are disjoint by construction.
+   Reads `dataset.targets` (normalizing tensor->list via `hasattr(targets, "tolist")`), which works
+   unchanged for both `MNIST` (tensor) and `CIFAR10` (list) targets, so this survives the CIFAR-10
+   migration without modification. Verified: root/pool disjoint, union covers the full training
+   set, root class distribution tightened to 54-67 samples per class out of 600.
+   **Status: Fixed.**
+
+9. **`get_reference_update` docstring/implementation mismatch** — `mechanisms/robust_aggregation.py`.
+   Docstring said "one step"; implementation trains a full epoch over the root loader (all
+   batches). Measured reference-update norm at ~30-80x smaller than a client's per-round update
+   norm, which matters given (7) above.
+   Discussed alongside (7): changing the actual compute budget (how much training the reference
+   model gets) is the same open design question as rebalancing `root_dataset_size` — not something
+   to decide in isolation here, and reducing to a literal one step would shrink the reference
+   norm further, making (7) worse rather than better.
+   Fix: docstring corrected to describe the actual behavior (full epoch), with a note on why the
+   reference update's norm is systematically smaller than a client's and a pointer to (7) for the
+   real design question.
+   **Status: Fixed** (docstring only; behavior unchanged, revisit alongside 7).
+
+10. **Every client evaluated on the full MNIST test set every round** — `server.py`
+    (`get_client_fn`), `test_loader` was built from the full `test_dataset`, not a per-client
+    slice. Numerically harmless (deterministic, so aggregating was redundant rather than wrong) but
+    15x more eval compute than needed per round, and not representative of realistic FL
+    evaluation.
+    Fix: switched to Flower's server-side `evaluate_fn` (`make_evaluate_fn()` in `server.py`),
+    which evaluates the global model once per round against the full test set on the server,
+    reusing `MnistClient.evaluate()` via a throwaway client rather than duplicating its
+    accuracy/confusion-matrix logic. Set `fraction_evaluate=0.0` on all strategies so Flower skips
+    federated (per-client) evaluation entirely, and `get_client_fn` no longer builds a `test_loader`
+    per client. `HistoryStrategyAdapter` gained an `evaluate()` override (alongside the existing
+    `aggregate_evaluate()`) that records centralized results into the same `run_history` dict/keys,
+    so `save_results()` and `visualize_results.py` are unaffected. Verified end to end (DP+FLTrust+
+    TopK, 6 clients, 3 rounds): single evaluation per round, correct accuracy/loss trajectory, full
+    10x10 confusion matrix (100 `cm_` keys) present, no crash.
+    **Status: Fixed.**
+
+11. **Dead code**: `AccountantStateManager.get_config()` (`server.py`) was defined but never
+    called — the actual code path used `get_state()` directly in `configure_fit`, duplicating the
+    config-building logic inline instead of reusing it.
+    Discussed consolidating rather than deleting, which surfaced a real naming trap: `get_config`'s
+    (and `store`'s) parameter was named `client_id`, but the state dict is actually keyed by
+    Flower's raw `node_id` (see `aggregate_fit`: `accountant_manager.store(client_proxy.node_id,
+    ...)`). Elsewhere in this codebase "`client_id`" specifically means the `0..num_clients-1`
+    slice index (`get_client_fn`) -- a different number from `node_id`. Calling `get_config()`
+    following that established naming convention would have silently found no accountant state.
+    Fix: renamed both `store()`'s and `get_config()`'s parameter to `node_id` to match what they
+    actually need, then had `configure_fit` call `accountant_manager.get_config(client_proxy.node_id,
+    server_round)` instead of duplicating the dict-building logic inline -- one source of truth.
+    Verified: DP run (4 clients, 4 rounds) shows accountant state correctly accumulating across
+    rounds (`epsilon: 4.04 -> 4.43 -> 4.74 -> 5.00`, converging on the target).
+    **Status: Fixed.**
+
+12. **`visualize_results.py` had unused/undeclared imports** — `from networkx import efficiency`
+    and `from numpy import sort` were both unused. `networkx` isn't a declared dependency in
+    `pyproject.toml`, so this script would break in a clean install where it isn't pulled in
+    transitively by something else.
+    Fix: removed both import lines. Verified: script still parses and runs correctly against real
+    result data (`--plot lines` on an existing results folder).
+    **Status: Fixed.**
+
+13. **`run_configurations.py::save_results()` wrote to a relative `results/` path** —
+    `folder = os.path.join("results", run_timestamp)` resolved relative to the process's current
+    working directory, not the repo layout. Every prior run in `src/results/` was produced with
+    cwd set to `src/`; running the script as `python -m src.scripts.run_configurations` from
+    `code/` (cwd = `code/`) silently wrote to a brand-new `code/results/` instead, which was easy
+    to miss and easy to lose track of. Confirmed live: a sanity run landed in
+    `code/results/20260708_192659/` and had to be moved into `src/results/` by hand.
+    Fix: added `RESULTS_ROOT`, anchored to the script's own file location
+    (`os.path.dirname(os.path.abspath(__file__))`, one level up, plus `results`) instead of a
+    bare relative string, so output always lands in `src/results/` regardless of the invoking cwd.
+    Verified: `RESULTS_ROOT` resolves to `code/src/results` correctly even when invoked with cwd
+    set to the repo root.
+    **Status: Fixed.**
+
+## Other changes
+
+- **Trust scores now saved to the results JSON** (`TODO.md`: "Put trust scores per round in
+  results file"). `FLTrustStrategy.aggregate_fit()` (`mechanisms/robust_aggregation.py`) now
+  attaches one `trust_score_<node_id>` metric per client per round to its returned metrics dict
+  (on both the normal and the all-trust-zero return paths), keyed by Flower's `node_id` since it's
+  stable per simulated client across rounds. `run_configurations.py::save_results()` regroups
+  these into a `trust_scores: {node_id: score}` entry on each round in the saved JSON. Cast to
+  plain `float` at the source, since `cosine_similarity` returns numpy scalars, which aren't JSON
+  serializable and shouldn't leak into Flower's metrics dict. Verified: 6-client FLTrust run shows
+  6 distinct trust scores per round, the same 6 node_ids recurring across all 3 rounds.
+
+## Combined sanity check (bugs 6-13)
+
+Ran `run_configurations.py --config 8` (DP+FLTrust+TopK+Byzantine, production params: 15 clients,
+10 rounds, 3 Byzantine, root=600, 6 variants across epsilon in {1,5,10} x k in {0.01,0.1}) via the
+real script end to end, then `visualize_results.py --plot all` on the output. No crashes; results
+saved correctly to `src/results/20260708_210750/` (bug 13); 15 trust scores present per round in
+every variant's JSON (new trust-score feature); all standard plots (bar/radar/line/confusion/F1)
+generated cleanly (bug 12's import cleanup didn't break the pipeline). 5 of 6 variants show real,
+varying learning curves as epsilon/k change; the harshest combination (eps=5, k=0.01) sits near-flat
+at 0.1135 for 8 rounds before creeping to 0.1138 by round 10 -- confirmed as a genuine slow-start
+under extreme compression + noise (confusion matrix shows 9993/10000 predictions collapsed to class
+"1", matching MNIST's 11.35% class-1 base rate), not a reoccurrence of bug 1 (accuracy is not
+bit-identical across all rounds, and per-round trust scores are small but never exactly zero, so the
+all-trust-zero branch from bug 4 isn't what's firing here).
+
+## Literature comparison (smoke-test results review)
+
+Used to sanity-check the `smoketest_20260708_214728` results (10 clients, 8 rounds, no fixed random
+seed) against published numbers for each mechanism, after ruling out a code bug:
+
+- [Deep Learning with Differential Privacy (Abadi et al., 2016)](https://www.researchgate.net/publication/309444608_Deep_Learning_with_Differential_Privacy)
+  -- centralized DP-SGD on MNIST reaches ~95% at eps<=2 and ~97% at eps<=8, but over far more
+  training steps than an 8-round FL smoke test provides; used to confirm our lower DP accuracy is a
+  round-budget/scale issue, not a broken mechanism.
+- [FLTrust: Byzantine-robust Federated Learning via Trust Bootstrapping (Cao et al., 2021) -- NDSS Symposium](https://www.ndss-symposium.org/ndss-paper/fltrust-byzantine-robust-federated-learning-via-trust-bootstrapping/)
+  -- FLTrust holds FedAvg-no-attack accuracy even under 40-60% malicious clients; used to confirm
+  bug 1's fix is working (our 20%-Byzantine run lands within 1 point of baseline).
+- [cpSGD: Communication-efficient and differentially-private distributed SGD (Agarwal et al.)](https://www.researchgate.net/publication/325413771_cpSGD_Communication-efficient_and_differentially-private_distributed_SGD)
+  -- documents that DP + compression interactions are non-monotonic and regime-dependent rather than
+  simple monotone-in-epsilon curves; used to contextualize the DP-only epsilon ranking anomaly (see
+  seed-control note below) and the DP+TopK compounding-difficulty pattern.
+- [Gradient Sparsification Can Improve Performance of Differentially-Private Convex Machine Learning](https://arxiv.org/pdf/2011.14572)
+  -- further evidence that compression's effect on DP training is regime-dependent, not uniformly
+  helpful or harmful.
+
+**Related finding, now fixed -- see 14 and "Seed control" below.**
+
+14. **[High] `client_id = node_id % num_clients` could collide** -- `server.py` (`get_client_fn`).
+    Flower's `node_id` is an effectively-random large integer (not a small sequential one), so taking
+    it mod a small `num_clients` isn't guaranteed bijective. Reproduced directly: in one run, two
+    different physical clients both computed `client_id=2` while `client_id=0` was never used at all.
+    Discovered while debugging seed control, but this is a pre-existing bug independent of it -- it
+    means the configured `num_byzantine` count and per-client data-slice assignment have been
+    unreliable in every prior run of this codebase (seeded or not): a collision means two clients
+    duplicate the same data slice and role (both honest, or both malicious) while another slice never
+    gets trained on that run, and which physical client is "malicious" can silently vary run to run.
+    Fix: use Flower's own `context.node_config["partition-id"]` instead, which is guaranteed
+    collision-free and sequential (0..num_clients-1) by construction. Verified: 3 fresh runs x 2
+    rounds each, 4/4 unique node_ids in every round (zero collisions), versus a reproduced collision
+    on the old code before the fix.
+    **Status: Fixed.**
+
+## Seed control
+
+Added `ExperimentConfig.seed` (default `None` = old unseeded behavior) to make experiments
+reproducible -- primarily so a sweep (e.g. epsilon in {1, 5, 10}) shares the same data split and
+initial model, isolating whatever parameter is actually varied instead of confounding it with a
+different random starting point per run (see the epsilon-ranking anomaly above, which was exactly
+this). `run_configurations.py`'s `SHARED_PARAMS` now defaults to `seed=42` so this applies to every
+config sweep by default.
+
+Three separate sources of randomness had to be controlled, since each simulated client runs in its
+own Ray worker process (a separate OS process, not just a separate thread):
+- **Root/client data split** -- `load_datasets()` passes `seed` as `random_state` to
+  `train_test_split()`.
+- **Each client's model init and per-round training randomness** (data shuffling, DP noise) --
+  `client.py` gained a `set_seed()` helper (seeds `random`, `numpy`, and `torch`). Called once in
+  `MnistClient.__init__` as `seed + client_id` (covers whichever client Flower asks first for the
+  initial model), and again at the top of every `fit()` call as
+  `seed + client_id*1000 + server_round` (so each round still gets a genuinely different shuffle/
+  noise draw instead of repeating the same one every round). `LabelFlipClient` mirrors both.
+  `HistoryStrategyAdapter.configure_fit` now always injects `server_round` into each client's fit
+  config (previously only when DP was on), since round-aware seeding needs it regardless of DP.
+- **The initial global model itself** -- Flower's `Server._get_initial_parameters()` asks a random
+  client via `ClientManager.sample()`, which uses plain `random.sample()` running on a background
+  thread (`run_serverapp_th`) that races with other Flower/Ray threading -- seeding the main process
+  alone could not reliably control this. Fixed by building the initial model directly in
+  `run_simulation_with_config()` (now that the main process is seeded) and passing it as
+  `initial_parameters` to the strategy, which makes Flower skip the random-client step entirely.
+
+Verified in stages: root/client split reproducible on its own; baseline (no DP/FLTrust/TopK)
+byte-identical accuracy across two runs with the same seed; the full DP+FLTrust+TopK+Byzantine path
+reproducible in 3 of 4 rounds exactly, with a difference of one test-sample prediction (0.3536 vs
+0.3537 accuracy) in the 4th -- attributed to floating-point non-associativity in multi-threaded CPU
+matrix ops (a well-known PyTorch limitation, not a missed seed), not chased further since forcing bit-
+level determinism (`torch.use_deterministic_algorithms` + pinning thread counts to 1) would add real
+performance cost and risks breaking Opacus's gradient hooks, for a residual this small. A different
+seed was confirmed to still produce genuinely different results.

@@ -1,0 +1,252 @@
+{
+  "config": {
+    "config_id": 6,
+    "num_clients": 10,
+    "num_rounds": 8,
+    "num_byzantine": 2,
+    "use_dp": true,
+    "epsilon": 5.0,
+    "delta": 1e-05,
+    "use_fltrust": false,
+    "use_topk": true,
+    "topk_ratio": 0.01,
+    "root_dataset_size": 1000,
+    "rescale_to_ref_norm": false
+  },
+  "results": {
+    "elapsed_seconds": 259.35288643836975,
+    "noise_multiplier": 0.6396484375,
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        5,
+        936,
+        19,
+        0,
+        0,
+        20,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        759,
+        375,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        11,
+        922,
+        98,
+        0,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        986,
+        23,
+        0,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        430,
+        552,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        781,
+        100,
+        0,
+        0,
+        11,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        7,
+        890,
+        57,
+        0,
+        0,
+        4,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        988,
+        40,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        921,
+        52,
+        0,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        654,
+        355,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "per_class_scores": {
+      "0": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "1": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "2": {
+        "precision": 0.4583,
+        "recall": 0.0107,
+        "f1": 0.0208
+      },
+      "3": {
+        "precision": 0.1193,
+        "recall": 0.9762,
+        "f1": 0.2126
+      },
+      "4": {
+        "precision": 0.3303,
+        "recall": 0.5621,
+        "f1": 0.4161
+      },
+      "5": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "6": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "7": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "8": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "9": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      }
+    },
+    "per_round": [
+      {
+        "round": 1,
+        "loss": 2.3061759723261144,
+        "accuracy": 0.1051,
+        "epsilon": 3.3163329313247574,
+        "trust_scores": {}
+      },
+      {
+        "round": 2,
+        "loss": 2.3035421897047246,
+        "accuracy": 0.1195,
+        "epsilon": 3.67597295506474,
+        "trust_scores": {}
+      },
+      {
+        "round": 3,
+        "loss": 2.30097809919534,
+        "accuracy": 0.1377,
+        "epsilon": 3.955957794737051,
+        "trust_scores": {}
+      },
+      {
+        "round": 4,
+        "loss": 2.2984549862127333,
+        "accuracy": 0.1489,
+        "epsilon": 4.201516339344577,
+        "trust_scores": {}
+      },
+      {
+        "round": 5,
+        "loss": 2.2958944803609636,
+        "accuracy": 0.1553,
+        "epsilon": 4.419497586725848,
+        "trust_scores": {}
+      },
+      {
+        "round": 6,
+        "loss": 2.293307014928458,
+        "accuracy": 0.1559,
+        "epsilon": 4.622271726322694,
+        "trust_scores": {}
+      },
+      {
+        "round": 7,
+        "loss": 2.290468764381287,
+        "accuracy": 0.1573,
+        "epsilon": 4.815250728895467,
+        "trust_scores": {}
+      },
+      {
+        "round": 8,
+        "loss": 2.2879470011677605,
+        "accuracy": 0.1549,
+        "epsilon": 4.995908066782214,
+        "trust_scores": {}
+      }
+    ]
+  }
+}

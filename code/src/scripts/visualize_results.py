@@ -5,8 +5,6 @@ import os
 import sys
 import glob
 import matplotlib.pyplot as plt
-from networkx import efficiency
-from numpy import sort
 import numpy as np
 
 

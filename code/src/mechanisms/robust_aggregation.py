@@ -33,10 +33,14 @@ def cosine_similarity(a, b):
 
 def get_reference_update(model, root_loader, optimizer, loss_fn):
     """
-    Train the server model on root dataset for one step.
+    Train the server model on root dataset for one epoch.
 
     Produces a reference gradient direction that honest client
-    updates should roughly align with.
+    updates should roughly align with. Because root_loader holds far
+    fewer samples than a client's local dataset, one epoch here is far
+    fewer SGD steps than a client's local epoch, so the reference update's
+    norm is systematically smaller than a client update's norm (Roughly 6 times
+    for our tests)
 
     Args:
         model (nn.Module):          server-side reference model.
@@ -53,7 +57,7 @@ def get_reference_update(model, root_loader, optimizer, loss_fn):
         for p in model.parameters()
     ])
 
-    # One training step on root data
+    # One epoch of training on root data
     model.train()
     for images, labels in root_loader:
         optimizer.zero_grad()
@@ -160,14 +164,26 @@ class FLTrustStrategy(FedAvg):
 
         print(f"\n[FLTrust Round {server_round}] Trust scores: {[f'{s:.3f}' for s in trust_scores]}")
 
-        # If all trust scores are zero (hence we expect all clients to be 
+        # Keyed by Flower's node_id (stable per simulated client across
+        # rounds) so trust can be tracked per-client over the run once
+        # saved to the results file. Cast to plain float -- cosine_similarity
+        # returns numpy scalars, which Flower's metrics dict shouldn't hold
+        # (and which aren't JSON serializable as-is).
+        trust_metrics = {
+            f"trust_score_{client_proxy.node_id}": float(score)
+            for (client_proxy, _), score in zip(results, trust_scores)
+        }
+
+        # If all trust scores are zero (hence we expect all clients to be
         # malicious) we skip this round.
         total_trust = sum(trust_scores)
         if total_trust == 0:
             print("[FLTrust] WARNING: All trust scores are zero -> Skipping round!")
-            # Return unchanged global model
-            reference_parameters = [p.data.cpu().numpy() for p in self.ref_model.parameters()]
-            return ndarrays_to_parameters(reference_parameters), {}
+            # Return unchanged global model. self.ref_model can't be used here.
+            # It was already trained one epoch on the root dataset inside
+            # get_reference_update() above, so its weights no longer match the
+            # global model that was actually sent out this round.
+            return ndarrays_to_parameters(server_state_parameters), trust_metrics
 
         # Scale each update to reference norm and then apply a
         # weighted average
@@ -191,6 +207,11 @@ class FLTrustStrategy(FedAvg):
                 scale = update
             aggregated_norms += (score / total_trust) * scale
 
+        # aggregated_norms is the trust-weighted average of client delta
+        # (client_flattened - global_flattened) -- add the global weights
+        # back to get the actual new model, not just the update.
+        new_flattened = global_flattened + aggregated_norms
+
         # Convert back to Flower parameter format
         _, first_fit_result = results[0]
         original_parameters = parameters_to_ndarrays(first_fit_result.parameters)
@@ -201,7 +222,7 @@ class FLTrustStrategy(FedAvg):
         index = 0
         for shape in shapes:
             size = int(np.prod(shape))
-            new_parameters.append(aggregated_norms[index:index+size].reshape(shape))
+            new_parameters.append(new_flattened[index:index+size].reshape(shape))
             index += size
         
         # Aggregate fit metrics from clients
@@ -213,6 +234,7 @@ class FLTrustStrategy(FedAvg):
         aggregated_metrics = {}
         if fit_metrics and self.fit_metrics_aggregation_fn:
             aggregated_metrics = self.fit_metrics_aggregation_fn(fit_metrics)
+        aggregated_metrics.update(trust_metrics)
 
         return ndarrays_to_parameters(new_parameters), aggregated_metrics
 

@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from src.client import MnistClient
+from src.client import MnistClient, set_seed
 from src.mechanisms.dp import get_privacy_spent, make_private_with_noise_multiplier, restore_accountant_state, serialize_accountant_state
 from src.mechanisms.topk import topk_sparsify
 from src.models.mnist_cnn import MnistCNN
@@ -12,8 +12,8 @@ class LabelFlipClient(MnistClient):
     Malicious FL client that flips labels during training.
 
     Simulates a Byzantine attack by relabeling all training
-    samples from `source_label` to `target_label` before
-    computing the gradients. The server cannot distinguish
+    samples from `source_label` to `target_label` (and vice versa)
+    before computing the gradients. The server cannot distinguish
     this client from hontest ones since it returns normal
     shaped updates.
 
@@ -25,14 +25,17 @@ class LabelFlipClient(MnistClient):
         target_label (int):    the digit to relabel it as (e.g. 1).
         use_dp (bool):         whether to wrap training with DP-SGD.
         epsilon (float):       privacy budget. Only used when use_dp=True.
+        delta (float):         privacy failure probability. Only used when use_dp=True.
         num_rounds (int):      number of training rounds (each with 1 epoch) planned.
+        seed (int | None):     random seed for reproducible model init and per-round training
+                               randomness. None keeps the unseeded (different every run) behavior.
     """
 
     def __init__(self, client_id, train_loader, test_loader,
-                 source_label=7, target_label=1, use_dp=False, epsilon=10.0,
-                 use_topk=False, topk_ratio=0.1, num_rounds=1):
-        super().__init__(client_id, train_loader, test_loader, use_dp, epsilon,
-                         use_topk=use_topk, topk_ratio=topk_ratio, num_rounds=num_rounds)
+                 source_label=7, target_label=1, use_dp=False, epsilon=10.0, delta=1e-5,
+                 use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None):
+        super().__init__(client_id, train_loader, test_loader, use_dp, epsilon, delta,
+                         use_topk=use_topk, topk_ratio=topk_ratio, num_rounds=num_rounds, seed=seed)
         self.source_label = source_label
         self.target_label = target_label
 
@@ -49,8 +52,15 @@ class LabelFlipClient(MnistClient):
             tuple: (updated_parameters, num_samples, metrics_dict)
         """
         self.set_parameters(parameters)
+
+        if self.seed is not None:
+            # Re-seed per round so each round still gets a genuinely
+            # different data shuffle / DP noise draw, not the same one
+            # repeated every round.
+            set_seed(self.seed + self.client_id * 1000 + config.get("server_round", 1))
+
         ACCOUNTANT_STATE_KEY = "accountant_state"
-        
+
         # Recreate privacy engine
         if self.use_dp and self.noise_multiplier is not None:
             model_tmp = MnistCNN()
@@ -74,8 +84,10 @@ class LabelFlipClient(MnistClient):
         for images, labels in train_loader:
             # Flip source_label <-> target_label
             # TODO Try to use other numbers
-            labels[labels == self.source_label] = self.target_label
-            labels[labels == self.target_label] = self.source_label
+            source_mask = labels == self.source_label
+            target_mask = labels == self.target_label
+            labels[source_mask] = self.target_label
+            labels[target_mask] = self.source_label
 
             opt_tmp.zero_grad()
             outputs = model_tmp(images)
@@ -83,6 +95,9 @@ class LabelFlipClient(MnistClient):
             loss.backward()
             opt_tmp.step()
 
+        if self.use_dp and self.noise_multiplier is not None:
+            self.model.load_state_dict(model_tmp._module.state_dict())
+            
         updated_parameters = self.get_parameters(config={})
         metrics = {}
 
@@ -100,13 +115,10 @@ class LabelFlipClient(MnistClient):
                 updated_parameters.append(sparse_params[index:index+size].reshape(shape))
                 index += size
             metrics["topk_sparsity"] = np.count_nonzero(sparse_update) / len(sparse_update)
-            
-        if self.use_dp and self.noise_multiplier is not None:
-            self.model.load_state_dict(model_tmp._module.state_dict())
 
         if self.use_dp and self.privacy_engine is not None:
             metrics["epsilon"]           = get_privacy_spent(self.privacy_engine, self.delta)
             metrics[ACCOUNTANT_STATE_KEY] = serialize_accountant_state(self.privacy_engine)
             metrics["noise_multiplier"]  = self.noise_multiplier
 
-        return self.get_parameters(config={}), len(self.train_loader.dataset), metrics
+        return updated_parameters, len(self.train_loader.dataset), metrics

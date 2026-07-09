@@ -14,13 +14,20 @@ from src.experiment_config import ExperimentConfig
 from src.server import run_simulation_with_config
 
 # --------- Global setup ----------
+# Anchor to this script's location so results always land in src/results/,
+# regardless of the cwd the script happens to be invoked from.
+RESULTS_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "results"))
+
 # Shared parameters across all experiments
 SHARED_PARAMS = dict(
     num_clients = 15,
-    num_rounds = 25,
+    num_rounds = 10,
     num_byzantine = 3,
     root_dataset_size = 600,
     rescale_to_ref_norm = False,
+    seed = 42,  # Same data split + initial model across a config sweep, so
+                # only the parameter actually variy (epsilon, topk_ratio,
+                # etc.) explains any accuracy difference between variants.
 )
 
 
@@ -192,7 +199,7 @@ def inflate_confusion_matrix_mnist_and_calculate_scores(config: ExperimentConfig
 def save_results(config: ExperimentConfig, history,
                  elapsed_seconds: float, run_timestamp: str, multi_run=False):
     """
-    Save experiment results to a JSON file in results/.
+    Save experiment results to a JSON file in src/results/.
 
     Args:
         config (ExperimentConfig):  the experiment configuration.
@@ -202,9 +209,9 @@ def save_results(config: ExperimentConfig, history,
         multi_run (bool):           whether this is part of a multi run or not (for directory creation)
     """
     if multi_run:
-        folder = os.path.join("results", run_timestamp)
+        folder = os.path.join(RESULTS_ROOT, run_timestamp)
     else:
-        folder = "results"
+        folder = RESULTS_ROOT
     os.makedirs(folder, exist_ok=True)
 
     filename = make_filename(config, run_timestamp)
@@ -214,6 +221,16 @@ def save_results(config: ExperimentConfig, history,
     losses     = dict(history["losses_distributed"])
     accuracies = dict(history["metrics_distributed_evaluate"].get("accuracy", []))
     epsilons   = dict(history["metrics_distributed_fit"].get("epsilon", []))
+
+    # FLTrust reports one trust_score_<node_id> metric per client per round
+    # -- regroup into {round: {node_id: score}} for the results file.
+    trust_scores_by_round = {}
+    for key, per_round in history["metrics_distributed_fit"].items():
+        if not key.startswith("trust_score_"):
+            continue
+        node_id = key[len("trust_score_"):]
+        for r, score in per_round:
+            trust_scores_by_round.setdefault(r, {})[node_id] = round(score, 4)
 
     per_class_scores, confusion_matrix = inflate_confusion_matrix_mnist_and_calculate_scores(config, history)
 
@@ -243,6 +260,7 @@ def save_results(config: ExperimentConfig, history,
                     "loss": losses.get(r),
                     "accuracy": accuracies.get(r),
                     "epsilon": epsilons.get(r),
+                    "trust_scores": trust_scores_by_round.get(r, {}),
                 }
                 for r in range(1, config.num_rounds + 1)
             ]

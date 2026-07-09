@@ -1,3 +1,4 @@
+import random
 import numpy as np
 from sklearn.metrics import confusion_matrix
 import torch
@@ -15,13 +16,33 @@ warnings.filterwarnings("ignore", message="Optimal order is the largest alpha")
 warnings.filterwarnings("ignore", message="Full backward hook")
 
 
+def set_seed(seed):
+    """
+    Seed Python, NumPy, and PyTorch RNGs for reproducibility.
+
+    Each simulated client runs in its own Ray worker process, so seeding
+    only the main process isn't enough. This must be called inside each
+    client's own process to take effect there.
+
+    Args:
+        seed (int): seed value.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+
 class MnistClient(fl.client.NumPyClient):
     """Flower client wrapping our MNIST training loop."""
 
     def __init__(self, client_id, train_loader, test_loader,
                  use_dp=False, epsilon=10.0, delta=1e-5,
-                 use_topk=False, topk_ratio=0.1, num_rounds=1):
+                 use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None):
         self.client_id = client_id
+        self.seed = seed
+        if seed is not None:
+            # Deterministic starting point for this client. Re-seeded per round in fit() for training randomness (data shuffling, DP noise).
+            set_seed(seed + client_id)
         self.train_loader = train_loader
         self.test_loader = test_loader
         self.model = MnistCNN()
@@ -36,9 +57,8 @@ class MnistClient(fl.client.NumPyClient):
         self.privacy_engine = None
 
         if use_dp and train_loader is not None:
-            dataset_size = len(train_loader.dataset)
-            batch_size = train_loader.batch_size
-            sample_rate = batch_size / dataset_size
+            # Matches Opacus's own internal Poisson-sampling rate (see DPDataLoader.from_data_loader)
+            sample_rate = 1 / len(train_loader)
             self.noise_multiplier = compute_noise_multiplier(
                 target_epsilon=epsilon,
                 target_delta=delta,
@@ -117,7 +137,13 @@ class MnistClient(fl.client.NumPyClient):
         """
         # Load global weights into local model
         self.set_parameters(parameters)
-        
+
+        if self.seed is not None:
+            # Re-seed per round so each round still gets a genuinely
+            # different data shuffle / DP noise draw, not the same one
+            # repeated every round.
+            set_seed(self.seed + self.client_id * 1000 + config.get("server_round", 1))
+
         ACCOUNTANT_STATE_KEY = "accountant_state"
 
         # Recreate privacy engine
@@ -147,6 +173,10 @@ class MnistClient(fl.client.NumPyClient):
             loss.backward()
             opt_tmp.step()
 
+        # Keep here since otherwise topk does not work -> DP Fltrust exists but has some security breach possiblity
+        if self.use_dp and self.noise_multiplier is not None:
+            self.model.load_state_dict(model_tmp._module.state_dict())
+            
         updated_parameters = self.get_parameters(config={})
         metrics = {}
 
@@ -168,13 +198,11 @@ class MnistClient(fl.client.NumPyClient):
                 size = int(np.prod(shape))
                 updated_parameters.append(sparse_parameters[index:index+size].reshape(shape))
                 index += size
-            
+
             sparsity = np.count_nonzero(sparsified_update) / len(sparsified_update)
             metrics["topk_sparsity"] = sparsity
 
 
-        if self.use_dp and self.noise_multiplier is not None:
-            self.model.load_state_dict(model_tmp._module.state_dict())
         if self.use_dp and self.privacy_engine is not None:
             metrics["epsilon"] = get_privacy_spent(self.privacy_engine, self.delta)
             metrics[ACCOUNTANT_STATE_KEY] = serialize_accountant_state(self.privacy_engine)
