@@ -29,6 +29,31 @@ def topk_sparsify(update, k):
     return sparsified
 
 
+def unflatten(flat, shapes):
+    """
+    Split a flat vector back into a list of arrays with the given shapes.
+
+    Inverse of concatenating a list of per-layer arrays into one flat
+    vector (`np.concatenate([p.flatten() for p in parameters])`), a pattern
+    used throughout this project (topk, FLTrust, the scaling/scrambling
+    attacks) to operate on a whole model's parameters as one vector.
+
+    Args:
+        flat (np.ndarray):    flat vector, total size must match sum(shapes).
+        shapes (list[tuple]): target shape for each output array, in order.
+
+    Returns:
+        list[np.ndarray]: arrays reshaped per `shapes`, in the same order.
+    """
+    arrays = []
+    index = 0
+    for shape in shapes:
+        size = int(np.prod(shape))
+        arrays.append(flat[index:index + size].reshape(shape))
+        index += size
+    return arrays
+
+
 if __name__ == '__main__':
     update = np.array([0.01, -0.5, 0.001, 0.8, -0.3, 0.002, 0.4, -0.1])
     print(f"Original update: {update}")
@@ -38,3 +63,10 @@ if __name__ == '__main__':
         sparsified = topk_sparsify(update, k)
         print(f"k={k:.0%} -> kept {np.count_nonzero(sparsified)}/{len(update)} values")
         print(f"{sparsified}")
+
+    shapes = [(2, 2), (4,)]
+    flat = np.arange(8.0)
+    restored = unflatten(flat, shapes)
+    print(f"\nunflatten({flat}, {shapes}):")
+    for arr in restored:
+        print(arr)

@@ -31,22 +31,27 @@ def cosine_similarity(a, b):
     return np.dot(a, b) / (norm_a * norm_b)
 
 
-def get_reference_update(model, root_loader, optimizer, loss_fn):
+def get_reference_update(model, root_loader, optimizer, loss_fn, num_epochs=3):
     """
-    Train the server model on root dataset for one epoch.
+    Train the server model on root dataset for a few epochs.
 
     Produces a reference gradient direction that honest client
     updates should roughly align with. Because root_loader holds far
     fewer samples than a client's local dataset, one epoch here is far
     fewer SGD steps than a client's local epoch, so the reference update's
     norm is systematically smaller than a client update's norm (Roughly 6 times
-    for our tests)
+    for our tests).
+    Averaging over multiple epochs reduces the variance of
+    the resulting direction, which matters since it's compared to client
+    updates via cosine similarity every round.
 
     Args:
         model (nn.Module):          server-side reference model.
         root_loader (DataLoader):   small clean server-held dataset.
         optimizer (torch.optim):    optimizer for the reference model.
         loss_fn (nn.Module):        loss function.
+        num_epochs (int):           number of epochs to train the reference
+                                    model for. Defaults to 3.
 
     Returns:
         np.ndarray: flat vector of parameter updates (before - after training).
@@ -57,14 +62,15 @@ def get_reference_update(model, root_loader, optimizer, loss_fn):
         for p in model.parameters()
     ])
 
-    # One epoch of training on root data
+    # A few epochs of training on root data
     model.train()
-    for images, labels in root_loader:
-        optimizer.zero_grad()
-        outputs = model(images)
-        loss = loss_fn(outputs, labels)
-        loss.backward()
-        optimizer.step()
+    for _ in range(num_epochs):
+        for images, labels in root_loader:
+            optimizer.zero_grad()
+            outputs = model(images)
+            loss = loss_fn(outputs, labels)
+            loss.backward()
+            optimizer.step()
 
     # Record weights after training
     after = np.concatenate([
@@ -92,14 +98,17 @@ class FLTrustStrategy(FedAvg):
 
     Args:
         root_loader (DataLoader):   small clean server-held dataset.
+        ref_num_epochs (int):       epochs to train the reference model for
+                                    each round. Defaults to 3.
         **kwargs:                   passed through to FedAvg (e.g.
                                     fraction_fit, min_available_clients).
     """
 
-    def  __init__(self, root_loader, rescale_to_ref_norm=False, **kwargs):
+    def  __init__(self, root_loader, rescale_to_ref_norm=False, ref_num_epochs=3, **kwargs):
         super().__init__(**kwargs)
         self.root_loader = root_loader
         self.rescale_to_ref_norm=rescale_to_ref_norm
+        self.ref_num_epochs = ref_num_epochs
         self.ref_model = MnistCNN()
         self.ref_optimizer = torch.optim.SGD(self.ref_model.parameters(), lr=0.01)
         self.loss_fn = nn.CrossEntropyLoss()
@@ -137,8 +146,9 @@ class FLTrustStrategy(FedAvg):
         # Get reference update from servers root dataset
         reference_update = get_reference_update(
             self.ref_model, self.root_loader,
-            self.ref_optimizer, self.loss_fn
-        )    
+            self.ref_optimizer, self.loss_fn,
+            num_epochs=self.ref_num_epochs,
+        )
 
 
         # Compute client updates as deltas from the saved global state
@@ -164,14 +174,17 @@ class FLTrustStrategy(FedAvg):
 
         print(f"\n[FLTrust Round {server_round}] Trust scores: {[f'{s:.3f}' for s in trust_scores]}")
 
-        # Keyed by Flower's node_id (stable per simulated client across
-        # rounds) so trust can be tracked per-client over the run once
-        # saved to the results file. Cast to plain float -- cosine_similarity
-        # returns numpy scalars, which Flower's metrics dict shouldn't hold
-        # (and which aren't JSON serializable as-is).
+        # Build {node_id: trust} dict per round so trust can be tracked per-client over the run once
+        # saved to the results file.
         trust_metrics = {
             f"trust_score_{client_proxy.node_id}": float(score)
             for (client_proxy, _), score in zip(results, trust_scores)
+        }
+
+        # Keep malicious information per client instead of squashing it into a fraction
+        malicious_metrics = {
+            f"malicious_{client_proxy.node_id}": float(fit_result.metrics.get("is_malicious", 0.0))
+            for client_proxy, fit_result in results
         }
 
         # If all trust scores are zero (hence we expect all clients to be
@@ -183,7 +196,7 @@ class FLTrustStrategy(FedAvg):
             # It was already trained one epoch on the root dataset inside
             # get_reference_update() above, so its weights no longer match the
             # global model that was actually sent out this round.
-            return ndarrays_to_parameters(server_state_parameters), trust_metrics
+            return ndarrays_to_parameters(server_state_parameters), {**trust_metrics, **malicious_metrics}
 
         # Scale each update to reference norm and then apply a
         # weighted average
@@ -235,6 +248,7 @@ class FLTrustStrategy(FedAvg):
         if fit_metrics and self.fit_metrics_aggregation_fn:
             aggregated_metrics = self.fit_metrics_aggregation_fn(fit_metrics)
         aggregated_metrics.update(trust_metrics)
+        aggregated_metrics.update(malicious_metrics)
 
         return ndarrays_to_parameters(new_parameters), aggregated_metrics
 

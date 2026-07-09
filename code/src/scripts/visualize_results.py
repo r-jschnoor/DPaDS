@@ -294,18 +294,51 @@ def visualize_bar_chart_per_config(folder: str) -> None:
                 label=label,
                 alpha=1,
             ))
-    ax.legend(
-        handles=handles,
-        fontsize=6,
-        loc="upper center",
-        bbox_to_anchor=(0.5, -0.12),
-        ncol=4,
-        framealpha=0.8,
-        handleheight=2,
-    )
+    legend = None
+    if handles:
+        legend = ax.legend(
+            handles=handles,
+            fontsize=6,
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.12),
+            ncol=4,
+            framealpha=0.8,
+            handleheight=2,
+        )
 
     plt.tight_layout()
     plt.subplots_adjust(bottom=0.3)
+
+    # Run params, positioned just below the legend's actual rendered bottom
+    # edge -- computed after layout so it hugs a short legend (few variants)
+    # and still clears a tall, many-row one (many variants), rather than a
+    # fixed offset tuned for one particular legend size. Legend.get_window_extent()
+    # needs a draw() first so the renderer has real (not stale) coordinates,
+    # and Legend defaults to zorder=5 vs. Text's zorder=3, which is why a
+    # fixed-offset text used to render underneath a tall legend instead of
+    # just missing it.
+    run_config = results[0]["config"]
+    attack_type = run_config.get("attack_type", "label_flip")
+    attack_scale = run_config.get("attack_scale")
+    attack_text = f"Attack: {attack_type}"
+    if attack_scale is not None and attack_scale != 1.0:
+        attack_text += f" (scale x{attack_scale})"
+    params_text = (
+        f"Clients: {run_config['num_clients']}  |  "
+        f"Byzantine: {run_config['num_byzantine']}  |  "
+        f"Rounds: {run_config['num_rounds']}  |  "
+        f"Root Dataset Size: {run_config['root_dataset_size']}  |  "
+        f"{attack_text}"
+    )
+    if legend is not None:
+        fig.canvas.draw()
+        legend_bbox_axes = legend.get_window_extent(fig.canvas.get_renderer()).transformed(ax.transAxes.inverted())
+        text_y = legend_bbox_axes.y0 - 0.03
+    else:
+        text_y = -0.05
+    ax.text(0.5, text_y, params_text, ha="center", va="top",
+            fontsize=8, transform=ax.transAxes)
+
     output_path = os.path.join(folder, "bar_accuracy.png")
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     print(f"Saved to: {output_path}")
@@ -800,6 +833,64 @@ def group_by_config_id(results):
     }
 
 
+def visualize_label_distribution(folder: str) -> None:
+    """
+    Stacked bar chart of label counts in the root set and each client's shard.
+
+    The split is identical across every variant in a run folder (same
+    root_dataset_size/num_clients/seed), so this reads the label_distribution
+    block from any one result file. Older result files saved before this
+    field existed are skipped gracefully.
+
+    Args:
+        folder (str): path to folder containing result JSON files.
+    """
+    results = load_results(folder)
+
+    label_distribution = None
+    for result in results:
+        label_distribution = result["results"].get("label_distribution")
+        if label_distribution is not None:
+            break
+
+    if label_distribution is None:
+        print("No label_distribution field found in any result file -- skipping label distribution plot.")
+        return
+
+    os.makedirs(os.path.join(folder, "label_distribution"), exist_ok=True)
+
+    digit_labels = [str(i) for i in range(10)]
+    colors = plt.cm.tab10.colors
+
+    bar_names = ["Root"] + [f"C{cid}" for cid in sorted(label_distribution["clients"], key=int)]
+    bar_data  = [label_distribution["root"]] + [
+        label_distribution["clients"][cid] for cid in sorted(label_distribution["clients"], key=int)
+    ]
+
+    fig, ax = plt.subplots(figsize=(max(10, len(bar_names) * 0.4), 6))
+    ax.set_title("Label Distribution: Root Dataset + Each Client's Train Shard", fontsize=13)
+    ax.set_ylabel("Sample count")
+    ax.grid(axis="y", alpha=0.3)
+
+    x = np.arange(len(bar_names))
+    bottom = np.zeros(len(bar_names))
+    for digit, color in zip(digit_labels, colors):
+        heights = np.array([counts.get(digit, 0) for counts in bar_data])
+        ax.bar(x, heights, bottom=bottom, color=color, width=0.8, label=digit)
+        bottom += heights
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(bar_names, fontsize=6 if len(bar_names) > 20 else 8, rotation=90)
+    ax.legend(title="Digit", fontsize=7, loc="upper center",
+              bbox_to_anchor=(0.5, -0.15), ncol=10, framealpha=0.8)
+
+    plt.tight_layout()
+    output_path = os.path.join(folder, "label_distribution", "label_distribution.png")
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    print(f"Saved to: {output_path}")
+    plt.close()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Visualize FL trilemma results from a results folder.",
@@ -812,11 +903,11 @@ if __name__ == "__main__":
     )
     parser.add_argument("--plot", type=str,
                         choices=["all", "lines", "bar", "radar", "radar_per_conf", "lines_per_conf",
-                                 "confusion", "f1_chart", "f1_table_per_conf"],
+                                 "confusion", "f1_chart", "f1_table_per_conf", "label_dist"],
                         default="all",
                         help="which plot to generate (default: all)")
     args = parser.parse_args(args=None if len(sys.argv) > 1 else ["--help"])
-    
+
     if args.plot in ("all", "lines"):
         visualize_overview(args.folder)
     if args.plot in ("all", "bar"):
@@ -831,5 +922,7 @@ if __name__ == "__main__":
         visualize_confusion_matrices(args.folder)
     if args.plot in ("all", "f1_chart"):
         visualize_f1_score(args.folder)
+    if args.plot in ("all", "label_dist"):
+        visualize_label_distribution(args.folder)
     if args.plot in ("all", "f1_table_per_conf"):
         visualize_f1_tables(args.folder)

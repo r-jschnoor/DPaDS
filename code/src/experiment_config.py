@@ -26,6 +26,15 @@ class ExperimentConfig:
                                 unseeded (different every run) behavior. Configs sharing the
                                 same seed get the same data split and initial global model,
                                 isolating whatever parameter differs between them.
+        attack_type (str):      which Byzantine attack malicious clients run: "label_flip" or
+                                "random_gradient". Same attack for every malicious client in a run.
+        attack_scale (float | None): None or 1.0 for the base (unscaled) attack, otherwise the
+                                     scale factor applied to the attack's resulting update
+                                     (see mechanisms.attacks.ScaledUpdateMixin).
+        source_label (int):     the digit malicious clients relabel. Only used when
+                                attack_type="label_flip".
+        target_label (int):     the digit malicious clients relabel it as. Only used when
+                                attack_type="label_flip".
     """
     config_id:          int
     num_clients:        int   = 4
@@ -40,3 +49,7 @@ class ExperimentConfig:
     root_dataset_size:  int   = 2000
     rescale_to_ref_norm: bool = False
     seed:               int | None = None
+    attack_type:        str   = "label_flip"
+    attack_scale:       float | None = None
+    source_label:       int   = 3
+    target_label:       int   = 7

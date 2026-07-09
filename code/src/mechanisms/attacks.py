@@ -3,7 +3,7 @@ import torch
 
 from src.client import MnistClient, set_seed
 from src.mechanisms.dp import get_privacy_spent, make_private_with_noise_multiplier, restore_accountant_state, serialize_accountant_state
-from src.mechanisms.topk import topk_sparsify
+from src.mechanisms.topk import topk_sparsify, unflatten
 from src.models.mnist_cnn import MnistCNN
 
 
@@ -38,6 +38,7 @@ class LabelFlipClient(MnistClient):
                          use_topk=use_topk, topk_ratio=topk_ratio, num_rounds=num_rounds, seed=seed)
         self.source_label = source_label
         self.target_label = target_label
+        self.is_malicious = True
 
 
     def fit(self, parameters, config):
@@ -99,7 +100,7 @@ class LabelFlipClient(MnistClient):
             self.model.load_state_dict(model_tmp._module.state_dict())
             
         updated_parameters = self.get_parameters(config={})
-        metrics = {}
+        metrics = {"is_malicious": float(self.is_malicious)}
 
         if self.use_topk:
             flat_before = np.concatenate([p.flatten() for p in parameters])
@@ -122,3 +123,242 @@ class LabelFlipClient(MnistClient):
             metrics["noise_multiplier"]  = self.noise_multiplier
 
         return updated_parameters, len(self.train_loader.dataset), metrics
+
+
+class RandomGradientClient(MnistClient):
+    """
+    Malicious FL client that sends arbitrary (uninformative) updates.
+
+    Simulates a Byzantine attack where the client contributes noise instead
+    of a genuine trained direction. Two paths exist, matched to whether DP is
+    active for this run:
+
+    - use_dp=False: no training happens at all. The "update" is pure,
+      unscaled random noise added directly to the received global weights.
+    - use_dp=True: real training happens (delegates to MnistClient.fit(),
+      the exact honest-client DP-SGD pipeline), and only the resulting flat
+      delta gets randomly permuted before being returned. This is
+      intended. Reusing the real DP pipeline keeps the
+      reported metrics identical in shape to an honest client, with
+      genuinely-accounted values, and matches an honest
+      client's compute time too.
+
+    Args:
+        client_id (int):       unique client identifier.
+        train_loader:          local training dataloader.
+        test_loader:           local test dataloader.
+        use_dp (bool):         whether to wrap training with DP-SGD.
+        epsilon (float):       privacy budget. Only used when use_dp=True.
+        delta (float):         privacy failure probability. Only used when use_dp=True.
+        num_rounds (int):      number of training rounds (each with 1 epoch) planned.
+        seed (int | None):     random seed for reproducible model init and per-round training
+                               randomness. None keeps the unseeded (different every run) behavior.
+    """
+
+    def __init__(self, client_id, train_loader, test_loader,
+                 use_dp=False, epsilon=10.0, delta=1e-5,
+                 use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None):
+        super().__init__(client_id, train_loader, test_loader, use_dp, epsilon, delta,
+                         use_topk=use_topk, topk_ratio=topk_ratio, num_rounds=num_rounds, seed=seed)
+        self.is_malicious = True
+
+
+    def fit(self, parameters, config):
+        """
+        Return an arbitrary update instead of a genuinely trained one.
+
+        Args:
+            parameters (list[np.ndarray]): global model weights from server.
+            config (dict):                 training config from server.
+
+        Returns:
+            tuple: (updated_parameters, num_samples, metrics_dict)
+        """
+        if self.use_dp and self.noise_multiplier is not None:
+            # Real DP-SGD training via the honest pipeline
+            honest_parameters, num_examples, metrics = super().fit(parameters, config)
+
+            flat_before = np.concatenate([p.flatten() for p in parameters])
+            flat_after  = np.concatenate([p.flatten() for p in honest_parameters])
+            # Shuffles element positions across the whole flattened model -> preserves the exact value multiset/norm, destroys direction.
+            scrambled_delta = np.random.permutation(flat_after - flat_before)
+
+            shapes = [p.shape for p in honest_parameters]
+            updated_parameters = unflatten(flat_before + scrambled_delta, shapes)
+            return updated_parameters, num_examples, metrics
+
+        # No DP: no training at all, no dataset access.
+        if self.seed is not None:
+            set_seed(self.seed + self.client_id * 1000 + config.get("server_round", 1))
+
+        flat_before = np.concatenate([p.flatten() for p in parameters])
+        noise = np.random.randn(*flat_before.shape)
+
+        metrics = {"is_malicious": float(self.is_malicious)}
+        if self.use_topk:
+            # Sparsify the noise itself, same as an honest client sparsifies its real update
+            noise = topk_sparsify(noise, self.topk_ratio)
+            metrics["topk_sparsity"] = np.count_nonzero(noise) / len(noise)
+
+        shapes = [p.shape for p in parameters]
+        updated_parameters = unflatten(flat_before + noise, shapes)
+        return updated_parameters, len(self.train_loader.dataset), metrics
+
+
+class ScaledUpdateMixin:
+    """
+    Mixin that rescales whatever update the wrapped attack class produces.
+
+    Multiplies the flat parameter delta by attack_scale before
+    returning it, so scaling composes with any base attack instead of being
+    a separate attack implementation. Must be listed before the base attack
+    class in the MRO, e.g. `class ScaledLabelFlipClient(ScaledUpdateMixin,
+    LabelFlipClient)`. 
+    
+    Args:
+        attack_scale (float): multiplier applied to the update. >1 makes
+                              the update larger than what the wrapped
+                              attack would normally send.
+        *args, **kwargs:      forwarded to the wrapped attack class's __init__.
+    """
+
+    def __init__(self, *args, attack_scale=1.0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.attack_scale = attack_scale
+
+
+    def fit(self, parameters, config):
+        """
+        Scale the wrapped attack's update by attack_scale.
+
+        Args:
+            parameters (list[np.ndarray]): global model weights from server.
+            config (dict):                 training config from server.
+
+        Returns:
+            tuple: (updated_parameters, num_samples, metrics_dict)
+        """
+        updated_parameters, num_examples, metrics = super().fit(parameters, config)
+
+        flat_before = np.concatenate([p.flatten() for p in parameters])
+        flat_after  = np.concatenate([p.flatten() for p in updated_parameters])
+        scaled_flat = flat_before + (flat_after - flat_before) * self.attack_scale
+
+        shapes = [p.shape for p in updated_parameters]
+        scaled_parameters = unflatten(scaled_flat, shapes)
+
+        return scaled_parameters, num_examples, metrics
+
+
+class ScaledLabelFlipClient(ScaledUpdateMixin, LabelFlipClient):
+    """Label-flip attack with its resulting update scaled up (see ScaledUpdateMixin)."""
+    pass
+
+
+class ScaledRandomGradientClient(ScaledUpdateMixin, RandomGradientClient):
+    """Random-gradient attack with its resulting update scaled up (see ScaledUpdateMixin)."""
+    pass
+
+
+# Keyed by (attack_type, is_scaled) -> e.g. ("random_gradient", True) means
+# "random-gradient attack, wrapped in ScaledUpdateMixin".
+ATTACK_CLASSES = {
+    ("label_flip", False):      LabelFlipClient,
+    ("label_flip", True):       ScaledLabelFlipClient,
+    ("random_gradient", False): RandomGradientClient,
+    ("random_gradient", True):  ScaledRandomGradientClient,
+}
+
+
+def build_malicious_client(client_id, train_loader, test_loader, attack_type, attack_scale,
+                           source_label=3, target_label=7,
+                           use_dp=False, epsilon=10.0, delta=1e-5,
+                           use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None):
+    """
+    Construct the malicious client for one Byzantine slot.
+
+    Centralizes attack dispatch (which class to build, and which kwargs it
+    needs) so get_client_fn() doesn't need to know about
+    individual attack classes or their constructor differences.
+
+    Args:
+        client_id (int):       unique client identifier.
+        train_loader:          local training dataloader.
+        test_loader:           local test dataloader.
+        attack_type (str):        "label_flip" or "random_gradient".
+        attack_scale (float | None): None or 1.0 for the base (unscaled)
+                                     attack, otherwise the scale factor for
+                                     the wrapped (Scaled*) variant.
+        source_label (int):    the digit to relabel. Only used when
+                               attack_type="label_flip".
+        target_label (int):    the digit to relabel it as. Only used when
+                               attack_type="label_flip".
+        use_dp (bool):         whether to wrap training with DP-SGD.
+        epsilon (float):       privacy budget. Only used when use_dp=True.
+        delta (float):         privacy failure probability. Only used when use_dp=True.
+        use_topk (bool):       whether to use top-k sparsification.
+        topk_ratio (float):    the ratio of kept top-k values.
+        num_rounds (int):      number of training rounds (each with 1 epoch) planned.
+        seed (int | None):     random seed for reproducible model init and per-round training
+                               randomness. None keeps the unseeded (different every run) behavior.
+
+    Returns:
+        MnistClient: the constructed malicious client (not yet .to_client()'d).
+    """
+    is_scaled = attack_scale is not None and attack_scale != 1.0
+    client_cls = ATTACK_CLASSES[(attack_type, is_scaled)]
+
+    kwargs = dict(
+        use_dp=use_dp, epsilon=epsilon, delta=delta,
+        use_topk=use_topk, topk_ratio=topk_ratio,
+        num_rounds=num_rounds, seed=seed,
+    )
+    if attack_type == "label_flip":
+        kwargs.update(source_label=source_label, target_label=target_label)
+    if is_scaled:
+        kwargs["attack_scale"] = attack_scale
+
+    return client_cls(client_id, train_loader, test_loader, **kwargs)
+
+
+if __name__ == "__main__":
+    from torch.utils.data import TensorDataset, DataLoader
+
+    x = torch.randn(64, 1, 28, 28)
+    y = torch.randint(0, 10, (64,))
+    train_loader = DataLoader(TensorDataset(x, y), batch_size=32)
+
+    model = MnistCNN()
+    parameters = [p.data.cpu().numpy() for p in model.parameters()]
+    config = {"server_round": 1}
+
+    print("Testing malicious client classes (no DP, no topk):\n")
+    for name, cls, kwargs in [
+        ("LabelFlipClient",            LabelFlipClient,            dict(source_label=3, target_label=7)),
+        ("RandomGradientClient",       RandomGradientClient,       dict()),
+        ("ScaledLabelFlipClient",      ScaledLabelFlipClient,      dict(source_label=3, target_label=7, attack_scale=5.0)),
+        ("ScaledRandomGradientClient", ScaledRandomGradientClient, dict(attack_scale=5.0)),
+    ]:
+        client = cls(client_id=0, train_loader=train_loader, test_loader=None, **kwargs)
+        updated_parameters, num_examples, metrics = client.fit(parameters, config)
+        shapes_match = all(u.shape == p.shape for u, p in zip(updated_parameters, parameters))
+        print(f"{name}: shapes_match={shapes_match}, num_examples={num_examples}, "
+              f"is_malicious={metrics.get('is_malicious')}")
+
+    print("\nTesting RandomGradientClient with DP (checks metrics-key parity with honest clients):")
+    dp_client = RandomGradientClient(
+        client_id=0, train_loader=train_loader, test_loader=None,
+        use_dp=True, epsilon=5.0, delta=1e-5, num_rounds=3,
+    )
+    updated_parameters, num_examples, metrics = dp_client.fit(parameters, config)
+    print(f"  metrics keys: {sorted(metrics.keys())}")
+    print(f"  epsilon={metrics.get('epsilon'):.4f}, noise_multiplier={metrics.get('noise_multiplier'):.4f}")
+
+    print("\nTesting build_malicious_client() dispatch:")
+    for attack_type in ["label_flip", "random_gradient"]:
+        for attack_scale in [None, 3.0]:
+            client = build_malicious_client(
+                client_id=0, train_loader=train_loader, test_loader=None,
+                attack_type=attack_type, attack_scale=attack_scale,
+            )
+            print(f"  attack_type={attack_type}, attack_scale={attack_scale} -> {type(client).__name__}")

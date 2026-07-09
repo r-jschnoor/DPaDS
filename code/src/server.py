@@ -1,5 +1,7 @@
 from re import U
 
+from collections import Counter
+
 import flwr as fl
 from flwr.common import FitIns, ndarrays_to_parameters
 from flwr.server import ServerApp, ServerConfig, ServerAppComponents
@@ -15,7 +17,7 @@ import logging
 
 from src.client import MnistClient, set_seed
 from src.experiment_config import ExperimentConfig
-from src.mechanisms.attacks import LabelFlipClient
+from src.mechanisms.attacks import build_malicious_client
 from src.mechanisms.robust_aggregation import FLTrustStrategy
 from src.models.mnist_cnn import MnistCNN
 
@@ -246,9 +248,49 @@ def load_datasets(root_dataset_size, seed=None):
     )
 
     root_subset = Subset(train_dataset, root_indices)
-    root_loader = DataLoader(root_subset, batch_size=32, shuffle=True)
+    # Larger than the client batch_size on purpose
+    root_loader = DataLoader(root_subset, batch_size=128, shuffle=True)
 
     return train_dataset, test_dataset, root_loader, client_pool_indices
+
+
+def compute_label_distribution(train_dataset, client_pool_indices, root_indices, num_clients):
+    """
+    Count how many samples of each label the root set and each client hold.
+
+    client_pool_indices is sliced the same way get_client_fn()'s client_fn()
+    slices it (see slice_size/start/end there), so this reports exactly what
+    each client actually trains on. Safe to call once per run -- the split
+    itself never changes across rounds (see load_datasets()).
+
+    Args:
+        train_dataset:                   full MNIST training dataset.
+        client_pool_indices (list[int]): train_dataset indices clients draw from.
+        root_indices (list[int]):        train_dataset indices in the server's root set.
+        num_clients (int):               total number of simulated clients.
+
+    Returns:
+        dict: {"root": {label: count}, "clients": {client_id: {label: count}}},
+             with label keys as strings for JSON-friendliness.
+    """
+    targets = train_dataset.targets
+    if hasattr(targets, "tolist"):
+        targets = targets.tolist()
+
+    def label_counts(indices):
+        counts = Counter(str(targets[i]) for i in indices)
+        return dict(counts)
+
+    total = len(client_pool_indices)
+    slice_size = total // num_clients
+
+    clients = {}
+    for client_id in range(num_clients):
+        start = client_id * slice_size
+        end = start + slice_size
+        clients[str(client_id)] = label_counts(client_pool_indices[start:end])
+
+    return {"root": label_counts(root_indices), "clients": clients}
 
 
 def make_evaluate_fn(test_dataset):
@@ -281,7 +323,9 @@ def make_evaluate_fn(test_dataset):
 
 def get_client_fn(train_dataset, client_pool_indices, num_clients,
                   num_byzantine=0, use_dp=False, epsilon=10.0, delta=1e-5,
-                  use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None):
+                  use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None,
+                  attack_type="label_flip", attack_scale=None,
+                  source_label=3, target_label=7):
     """
     Returns a function that creates a client with it own data slice.
 
@@ -289,9 +333,9 @@ def get_client_fn(train_dataset, client_pool_indices, num_clients,
     client gets a unique slice of the training data, simulating real
     FL where each device has its own local dataset.
 
-    The first num_byzantine clients are malicious LabelFlipClients,
-    the rest are honest MnistClients. Evaluation is centralized on the
-    server (see make_evaluate_fn), so clients don't need test data.
+    The first num_byzantine clients are malicious, the rest are honest
+    MnistClients. Evaluation is centralized on the server (see
+    make_evaluate_fn), so clients don't need test data.
 
     Args:
         train_dataset:           full MNIST training dataset.
@@ -308,6 +352,14 @@ def get_client_fn(train_dataset, client_pool_indices, num_clients,
         num_rounds (int):        number of training rounds (each with 1 epoch) planned
         seed (int | None):       random seed for reproducible model init and per-round training
                                  randomness. None keeps the unseeded (different every run) behavior.
+        attack_type (str):       which Byzantine attack malicious clients run: "label_flip" or
+                                 "random_gradient".
+        attack_scale (float | None): None or 1.0 for the base (unscaled) attack, otherwise the
+                                     scale factor for the wrapped (Scaled*) variant.
+        source_label (int):      the digit malicious clients relabel. Only used when
+                                 attack_type="label_flip".
+        target_label (int):      the digit malicious clients relabel it as. Only used when
+                                 attack_type="label_flip".
 
     Returns:
         function: client_fn(context) -> flwr.client.Client
@@ -348,9 +400,10 @@ def get_client_fn(train_dataset, client_pool_indices, num_clients,
 
         # First num_byzantine clients are malicious
         if client_id < num_byzantine:
-            return LabelFlipClient(
+            return build_malicious_client(
                 client_id, train_loader, test_loader=None,
-                source_label=3, target_label=7,
+                attack_type=attack_type, attack_scale=attack_scale,
+                source_label=source_label, target_label=target_label,
                 use_dp=use_dp, epsilon=epsilon, delta=delta,
                 use_topk=use_topk, topk_ratio=topk_ratio,
                 num_rounds=num_rounds, seed=seed,
@@ -477,6 +530,10 @@ def run_simulation_with_config(config: ExperimentConfig):
         "losses_distributed": [],
         "metrics_distributed_evaluate": {},
         "metrics_distributed_fit": {},
+        "label_distribution": compute_label_distribution(
+            train_dataset, client_pool_indices,
+            root_loader.dataset.indices, config.num_clients,
+        ),
     }
 
     # Shared state manager to persist states across rounds
@@ -538,6 +595,8 @@ def run_simulation_with_config(config: ExperimentConfig):
             use_dp=config.use_dp, epsilon=config.epsilon, delta=config.delta,
             use_topk=config.use_topk, topk_ratio=config.topk_ratio,
             num_rounds=config.num_rounds, seed=config.seed,
+            attack_type=config.attack_type, attack_scale=config.attack_scale,
+            source_label=config.source_label, target_label=config.target_label,
         )
     )
     server_app = ServerApp(server_fn=server_fn)

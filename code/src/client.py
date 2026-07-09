@@ -55,6 +55,7 @@ class MnistClient(fl.client.NumPyClient):
         self.topk_ratio = topk_ratio
         self.num_rounds = num_rounds
         self.privacy_engine = None
+        self.is_malicious = False
 
         if use_dp and train_loader is not None:
             # Matches Opacus's own internal Poisson-sampling rate (see DPDataLoader.from_data_loader)
@@ -178,7 +179,7 @@ class MnistClient(fl.client.NumPyClient):
             self.model.load_state_dict(model_tmp._module.state_dict())
             
         updated_parameters = self.get_parameters(config={})
-        metrics = {}
+        metrics = {"is_malicious": float(self.is_malicious)}
 
         if self.use_topk:
             # Compute update -> weights now - global weights

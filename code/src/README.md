@@ -300,3 +300,72 @@ matrix ops (a well-known PyTorch limitation, not a missed seed), not chased furt
 level determinism (`torch.use_deterministic_algorithms` + pinning thread counts to 1) would add real
 performance cost and risks breaking Opacus's gradient hooks, for a residual this small. A different
 seed was confirmed to still produce genuinely different results.
+
+## New Byzantine attacks: random-gradient and scaling
+
+Added two new attack methods alongside `LabelFlipClient`, per `TODO.md`'s "What to do next":
+`RandomGradientClient` (arbitrary, uninformative updates) and `ScaledUpdateMixin` (wraps any base
+attack to scale up its resulting update). Both live in `mechanisms/attacks.py`.
+
+`RandomGradientClient` has two paths, matched to whether DP is active for the run:
+
+- `use_dp=False`: no training happens at all -- no `train_loader` iteration, no dataset access.
+  The "update" is pure, unscaled random noise (`np.random.randn`) added directly to the received
+  global weights. True to the TODO's literal wording ("arbitrary gradients... without computing
+  on the dataset at all").
+- `use_dp=True`: a deliberate, scoped exception to the above. Real DP-SGD training happens by
+  delegating straight to `MnistClient.fit()` (`super().fit(parameters, config)`) -- the exact
+  honest-client Opacus pipeline, unmodified -- and only the *resulting* flat parameter delta gets
+  randomly permuted (`np.random.permutation`) before being returned. Permuting (not resampling)
+  preserves the exact value multiset/norm of the real trained-and-noised update while destroying
+  its direction, so it stays a meaningful Byzantine attack for FLTrust's cosine-similarity
+  scoring to be tested against.
+
+This design specifically avoids a real bug in `weighted_average_metrics()` (`server.py:430`):
+it aggregates the **intersection** of every client's metric-dict keys before computing anything,
+so a malicious client that skipped DP training and simply omitted `epsilon`/`noise_multiplier`
+would have silently dropped those keys for the *entire round, for every client* -- not just gone
+missing for the attacker. Reusing the honest DP pipeline verbatim means `RandomGradientClient`
+reports the exact same metric keys with genuinely-accounted values, no stub values, no
+aggregation bug. As a side effect (not the primary goal, but worth having), it also means real
+compute happens every round, defeating any future timing-based detection of malicious clients.
+Verified directly (4 clients, 1 Byzantine, DP on, epsilon=5.0, 2 rounds): `metrics_distributed_fit`
+contained `epsilon`/`noise_multiplier`/`accountant_state`/`is_malicious` every round exactly like
+an honest run (epsilon climbing `4.519 -> 4.999` toward the 5.0 target, matching real accountant
+behavior, not a fabricated value). The no-DP path was verified separately (4 clients, 1 Byzantine,
+2 rounds): no crash, no DP-related keys present (correctly absent, since no DP ran), accuracy
+`0.104 -> 0.132 -> 0.099`.
+
+`ScaledUpdateMixin` multiplies whatever update the wrapped base attack produces by `attack_scale`,
+via cooperative multiple inheritance (`class ScaledLabelFlipClient(ScaledUpdateMixin,
+LabelFlipClient)`, `class ScaledRandomGradientClient(ScaledUpdateMixin, RandomGradientClient)`) --
+scaling composes with either base attack instead of being a separate implementation. Verified with
+`attack_scale=5.0` against both base attacks (same seed, same starting parameters, comparing
+returned update norms): random-gradient `324.50 -> 1622.52` (ratio 5.000), label-flip
+`0.0138 -> 0.0691` (ratio 5.000) -- exact 5x in both cases.
+
+A small shared helper, `unflatten(flat, shapes)` (`mechanisms/topk.py`), was extracted for the
+flat-vector-to-per-layer-arrays reshape this new code needs in three places (both
+`RandomGradientClient` paths, `ScaledUpdateMixin`) instead of duplicating the loop again. Existing
+call sites with the same inline pattern (`client.py`, `LabelFlipClient`, `robust_aggregation.py`)
+were left untouched -- working code, out of scope here.
+
+Attack dispatch is centralized in `build_malicious_client()` (`mechanisms/attacks.py`), keyed by
+`(attack_type, is_scaled)` via an `ATTACK_CLASSES` lookup table, so `get_client_fn()` (`server.py`)
+doesn't need to know about individual attack classes or their constructor differences.
+`ExperimentConfig` gained `attack_type` (`"label_flip"` | `"random_gradient"`), `attack_scale`
+(`None`/`1.0` = unscaled), `source_label`, `target_label` -- the latter two promoted out of being
+hardcoded in `get_client_fn()` so they can be recorded per result file. Deliberately **not** a new
+sweep dimension in `run_configurations.py`'s `expand_config()`/`BASE_CONFIGS`: `attack_type`/
+`attack_scale`/`source_label`/`target_label` instead join `SHARED_PARAMS`, so one hand-edited value
+applies uniformly to every config in a run, avoiding a combinatorial explosion of variants.
+
+Both `source_label`/`target_label` (when `attack_type="label_flip"`, else `null`) and
+`attack_type`/`attack_scale` (always) are now recorded in every result file's `config` block
+(`save_results()`), and shown in the bar chart's params caption
+(`visualize_bar_chart_per_config()`) alongside clients/byzantine/rounds/root-dataset-size added
+previously -- old result files without these keys still render via `.get()` fallback, confirmed
+against a pre-existing 24-file result folder with no crash.
+
+The whole design derives array shapes from the `parameters` argument `fit()` already receives
+(never a hardcoded `MnistCNN()`), so it needs no changes when CIFAR-10 support lands.

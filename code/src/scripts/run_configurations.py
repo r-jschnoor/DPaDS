@@ -20,14 +20,21 @@ RESULTS_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__f
 
 # Shared parameters across all experiments
 SHARED_PARAMS = dict(
-    num_clients = 100,
-    num_rounds = 100,
+    num_clients = 50,
+    num_rounds = 50,
     num_byzantine = 20,
-    root_dataset_size = 200,
+    root_dataset_size = 1000,
     rescale_to_ref_norm = False,
     seed = 42,  # Same data split + initial model across a config sweep, so
                 # only the parameter actually variy (epsilon, topk_ratio,
                 # etc.) explains any accuracy difference between variants.
+    attack_type = "random_gradient",   # "label_flip" or "random_gradient" -> same
+                                   # attack for every config in a run, edit
+                                   # here to switch it.
+    attack_scale = 2.0,          # None/1.0 for unscaled, else the scale
+                                   # factor for the wrapped attack variant.
+    source_label = 3,             # Only used when attack_type="label_flip".
+    target_label = 7,
 )
 
 
@@ -75,8 +82,8 @@ BASE_CONFIGS = {
 }
 
 # Variants to explore
-EPSILON_VALUES = [1.0, 5.0, 10.0]
-TOPK_VALUES = [0.01, 0.1]
+EPSILON_VALUES = [1.0, 5.0, 10.0, 0.1]
+TOPK_VALUES = [0.01, 0.1, 0.5]
 
 
 def expand_config(base: ExperimentConfig) -> list[ExperimentConfig]:
@@ -133,7 +140,10 @@ def make_filename(config: ExperimentConfig, run_timestamp: str) -> str:
         f"rounds-{config.num_rounds}",
         f"clients-{config.num_clients}",
         f"byzantine-{config.num_byzantine}",
+        f"attack-{config.attack_type}",
     ]
+    if config.attack_scale is not None and config.attack_scale != 1.0:
+        parts.append(f"scale-{config.attack_scale}")
     return "_".join(parts) + ".json"
 
 
@@ -223,7 +233,7 @@ def save_results(config: ExperimentConfig, history,
     epsilons   = dict(history["metrics_distributed_fit"].get("epsilon", []))
 
     # FLTrust reports one trust_score_<node_id> metric per client per round
-    # -- regroup into {round: {node_id: score}} for the results file.
+    # -> regroup into {round: {node_id: score}} for the results file.
     trust_scores_by_round = {}
     for key, per_round in history["metrics_distributed_fit"].items():
         if not key.startswith("trust_score_"):
@@ -231,6 +241,16 @@ def save_results(config: ExperimentConfig, history,
         node_id = key[len("trust_score_"):]
         for r, score in per_round:
             trust_scores_by_round.setdefault(r, {})[node_id] = round(score, 4)
+
+    # Client-is-Malicious Data is reported once per round -> collapse into a
+    # single {node_id: bool} block instead of repeating.
+    malicious_clients = {}
+    for key, per_round in history["metrics_distributed_fit"].items():
+        if not key.startswith("malicious_"):
+            continue
+        node_id = key[len("malicious_"):]
+        if per_round:
+            malicious_clients[node_id] = bool(per_round[0][1])
 
     per_class_scores, confusion_matrix = inflate_confusion_matrix_mnist_and_calculate_scores(config, history)
 
@@ -248,12 +268,18 @@ def save_results(config: ExperimentConfig, history,
             "topk_ratio": config.topk_ratio,
             "root_dataset_size": config.root_dataset_size,
             "rescale_to_ref_norm": config.rescale_to_ref_norm,
+            "attack_type": config.attack_type,
+            "attack_scale": config.attack_scale,
+            "source_label": config.source_label if config.attack_type == "label_flip" else None,
+            "target_label": config.target_label if config.attack_type == "label_flip" else None,
         },
         "results": {
             "elapsed_seconds": elapsed_seconds,
             "noise_multiplier": dict(history["metrics_distributed_fit"].get("noise_multiplier", [])).get(1),  # same across all rounds -> take round 1
             "confusion_matrix": confusion_matrix,
             "per_class_scores": per_class_scores,
+            "label_distribution": history.get("label_distribution"),  # static per run -- see compute_label_distribution()
+            "malicious_clients": malicious_clients,  # static per run -- {node_id: bool}, FLTrust configs only
             "per_round": [
                 {
                     "round": r,
@@ -272,6 +298,31 @@ def save_results(config: ExperimentConfig, history,
 
     print(f"Results saved to: {filepath}")
 
+
+def save_run_summary(run_timestamp: str, num_configs_run: int, total_run_elapsed_seconds: float):
+    """
+    Save a summary file for a whole multi-config run.
+
+    Separate from the per-variant files written by save_results(), since
+    total wall-clock is only known once every config in the run has finished.
+
+    Args:
+        run_timestamp (str):               shared timestamp for this run.
+        num_configs_run (int):             how many config variants were run.
+        total_run_elapsed_seconds (float): wall-clock time for the whole run.
+    """
+    folder = os.path.join(RESULTS_ROOT, run_timestamp)
+    os.makedirs(folder, exist_ok=True)
+    summary_path = os.path.join(folder, "run_summary.json")
+
+    with open(summary_path, "w") as file:
+        json.dump({
+            "run_timestamp": run_timestamp,
+            "num_configs_run": num_configs_run,
+            "total_run_elapsed_seconds": total_run_elapsed_seconds,
+        }, file, indent=2)
+
+    print(f"Run summary saved to: {summary_path}")
 
 
 HELP_MENU = """
@@ -320,6 +371,7 @@ if __name__ == "__main__":
     multi_run = len(configs_to_run) > 1
 
     print(f"Configs to run: {len(configs_to_run)}")
+    run_start_time = time.time()
     for config in tqdm(configs_to_run, desc="Grid runs", position=0, leave=True):
         print(f"\nRunning config {config.config_id} | dp={config.use_dp} / epsilon={config.epsilon} / "
               f"fltrust={config.use_fltrust} / topk={config.use_topk} / k={config.topk_ratio} / "
@@ -331,5 +383,10 @@ if __name__ == "__main__":
         save_results(config, history, elapsed, run_timestamp=run_timestamp, multi_run=multi_run)
         print(f"Elapsed for this config: {elapsed} seconds\n")
         print(f"\n\n{'-'*10} END {'-'*10}\n\n")
-    
+
+    total_run_elapsed = time.time() - run_start_time
+    if multi_run:
+        save_run_summary(run_timestamp, len(configs_to_run), total_run_elapsed)
+    print(f"\nTotal run wall-clock: {total_run_elapsed:.1f} seconds")
+
     print("\nAll runs complete!")
