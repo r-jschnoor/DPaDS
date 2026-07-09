@@ -133,8 +133,14 @@ class RandomGradientClient(MnistClient):
     of a genuine trained direction. Two paths exist, matched to whether DP is
     active for this run:
 
-    - use_dp=False: no training happens at all. The "update" is pure,
-      unscaled random noise added directly to the received global weights.
+    - use_dp=False: no training happens at all. The "update" is a pure,
+      unit-norm random direction added directly to the received global
+      weights and normalized so its magnitude is a fixed, sane reference
+      point regardless of parameter count, rather than the ~300+ L2 norm a
+      raw per-parameter N(0,1) draw would have on a model this size (which
+      reliably blows the model up to NaN within a few dozen rounds once
+      aggregated across several such clients.
+      Actual magnitude control belongs to ScaledUpdateMixin.
     - use_dp=True: real training happens (delegates to MnistClient.fit(),
       the exact honest-client DP-SGD pipeline), and only the resulting flat
       delta gets randomly permuted before being returned. This is
@@ -193,6 +199,7 @@ class RandomGradientClient(MnistClient):
 
         flat_before = np.concatenate([p.flatten() for p in parameters])
         noise = np.random.randn(*flat_before.shape)
+        noise = noise / np.linalg.norm(noise)  # unit-norm direction -- see class docstring
 
         metrics = {"is_malicious": float(self.is_malicious)}
         if self.use_topk:

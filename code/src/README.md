@@ -310,9 +310,9 @@ attack to scale up its resulting update). Both live in `mechanisms/attacks.py`.
 `RandomGradientClient` has two paths, matched to whether DP is active for the run:
 
 - `use_dp=False`: no training happens at all -- no `train_loader` iteration, no dataset access.
-  The "update" is pure, unscaled random noise (`np.random.randn`) added directly to the received
-  global weights. True to the TODO's literal wording ("arbitrary gradients... without computing
-  on the dataset at all").
+  The "update" is a pure, unit-norm random direction added directly to the received global
+  weights. True to the TODO's literal wording ("arbitrary gradients... without computing on the
+  dataset at all").
 - `use_dp=True`: a deliberate, scoped exception to the above. Real DP-SGD training happens by
   delegating straight to `MnistClient.fit()` (`super().fit(parameters, config)`) -- the exact
   honest-client Opacus pipeline, unmodified -- and only the *resulting* flat parameter delta gets
@@ -336,13 +336,45 @@ behavior, not a fabricated value). The no-DP path was verified separately (4 cli
 2 rounds): no crash, no DP-related keys present (correctly absent, since no DP ran), accuracy
 `0.104 -> 0.132 -> 0.099`.
 
+**Found and fixed after merging**: the no-DP path originally added a *raw* `np.random.randn` draw
+(no normalization) as the update. For this model's ~105,866 parameters that has an L2 norm of
+~325 -- against a real trained client update's typical norm of ~0.01-2 in this project. In a real
+sweep (50 clients, 40% Byzantine, `attack_scale=2.0`, plain FedAvg / no FLTrust, config 1) this
+reliably blew the global model up to `NaN` within ~20 rounds: loss went `19.94 -> nan` at round 22
+and stayed `nan` through round 50, with the final confusion matrix showing literally 100% of
+predictions collapsed to class "0" for every input (`argmax` on NaN-filled logits), exactly
+matching the frozen `0.098` accuracy (MNIST's class-0 population share). Root cause: "not scaled"
+was implemented as "whatever magnitude a raw `N(0,1)` draw happens to have," rather than a true
+fixed reference scale -- an arbitrary, huge number unrelated to the model's actual working scale,
+not "no scale" at all. Fix: normalize the noise to a unit vector (`noise /
+np.linalg.norm(noise)`) before adding it, so the base attack sits at a sane, bounded-by-construction
+baseline regardless of parameter count, and `attack_scale` gives predictable control from there.
+Verified: unscaled update norm now exactly `1.0`, `attack_scale=2.0` gives exactly `2.0` (both
+measured directly against a real `MnistCNN()`'s parameters); a 10-client/40%-Byzantine/
+`attack_scale=2.0`/no-FLTrust re-run of the previously-crashing scenario now trains cleanly for
+all 15 rounds with finite loss throughout (`2.16 -> 0.16`) and accuracy climbing to `0.954`, no
+`NaN`.
+
+Related note: this failure mode is specific to plain FedAvg (config 1 has `use_fltrust=False`).
+For FLTrust-enabled configs, `rescale_to_ref_norm=True` (currently defaulted off, see "Low /
+design notes" above) would likely have mitigated it even before this fix -- FLTrust's cosine-
+similarity trust score is scale-invariant (so a huge-norm malicious update still gets a
+near-zero score), but that score is only a multiplicative *weight*; without
+`rescale_to_ref_norm`, a small-but-nonzero weight times an astronomically large update can still
+inject a disproportionate amount into the aggregate. `rescale_to_ref_norm` rescales every
+client's update to the reference update's norm *before* weighting, which directly bounds this --
+exactly the magnitude-inflation defense it exists for in the original FLTrust paper, as opposed
+to the direction-based defense the trust score itself provides.
+
 `ScaledUpdateMixin` multiplies whatever update the wrapped base attack produces by `attack_scale`,
 via cooperative multiple inheritance (`class ScaledLabelFlipClient(ScaledUpdateMixin,
 LabelFlipClient)`, `class ScaledRandomGradientClient(ScaledUpdateMixin, RandomGradientClient)`) --
-scaling composes with either base attack instead of being a separate implementation. Verified with
-`attack_scale=5.0` against both base attacks (same seed, same starting parameters, comparing
-returned update norms): random-gradient `324.50 -> 1622.52` (ratio 5.000), label-flip
-`0.0138 -> 0.0691` (ratio 5.000) -- exact 5x in both cases.
+scaling composes with either base attack instead of being a separate implementation. Verified
+against both base attacks (same seed, same starting parameters, comparing returned update norms):
+label-flip at `attack_scale=5.0`, `0.0138 -> 0.0691` (ratio 5.000); random-gradient (post the
+unit-norm fix below) at `attack_scale=2.0`, `1.0 -> 2.0` exactly -- confirms `attack_scale` now
+scales *from* the fixed unit-norm baseline as intended, not from an arbitrary raw-noise
+magnitude.
 
 A small shared helper, `unflatten(flat, shapes)` (`mechanisms/topk.py`), was extracted for the
 flat-vector-to-per-layer-arrays reshape this new code needs in three places (both
