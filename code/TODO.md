@@ -4,9 +4,12 @@
 - Implement CIFAR-10
 - BLADES validation
 
-- Byzantine clients random contributions
-- huge contributions
-- training time logging
+- Attack: Byzantine clients random contributions -> See what happens if attacking clients just send random gradients
+- Attack: Byzantine clients send huge random updates (real gradients scaled)
+- Log training time in results
+- Include If client was byzantine in trustscores
+- Revisit trust scores -!-
+-> Print gradients to check (mit info ob honest oder nicht)
 
 - Sample set of server needs to be representative (each labels needs to be there) -!-
 - Currently server trains ref dataset on clients_round+1 -> Slight derivation on gradient
