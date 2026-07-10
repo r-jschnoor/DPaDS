@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from src.experiment_config import ExperimentConfig
 from src.models import get_dataset_spec
-from src.server import run_simulation_with_config
+from src.server import run_simulation_with_config, resolve_device
 
 # --------- Global setup ----------
 # Anchor to this script's location so results always land in src/results/,
@@ -20,6 +20,10 @@ RESULTS_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__f
 
 DEFAULT_DATASET = "cifar10"   # "mnist" or "cifar10" -> same dataset for every config in a run, edit here to switch it.
 DEFAULT_MAX_CPUS = 25
+DEFAULT_MAX_GPU_CLIENTS = 4   # Only applies for dataset="cifar10" (see resolve_device()
+                              # in server.py) -- caps how many simulated clients share
+                              # the one selected GPU concurrently.
+DEFAULT_GPU_INDEX = 0         # None -> auto-pick the GPU with most free VRAM.
 
 # Shared parameters across all experiments
 SHARED_PARAMS = dict(
@@ -369,6 +373,13 @@ if __name__ == "__main__":
     parser.add_argument("--max-cpus", type=int, default=DEFAULT_MAX_CPUS, metavar="N",
                         help=f"cap the number of CPU cores Ray uses for every config in "
                              f"this invocation (default: {DEFAULT_MAX_CPUS})")
+    parser.add_argument("--max-gpu-clients", type=int, default=DEFAULT_MAX_GPU_CLIENTS, metavar="N",
+                        help=f"cap how many simulated clients share the GPU concurrently "
+                             f"(dataset=cifar10 only; default: {DEFAULT_MAX_GPU_CLIENTS})")
+    parser.add_argument("--gpu-index", type=int, default=None, metavar="N",
+                        help="manually claim physical GPU index N for this whole run "
+                             "(dataset=cifar10 only; default: auto-pick the GPU with most "
+                             "free VRAM)")
     args = parser.parse_args(args=None if len(sys.argv) > 1 else ["--help"])
 
     if args.all:
@@ -376,24 +387,32 @@ if __name__ == "__main__":
                           for c in expand_config(base)]
     else:
         configs_to_run = expand_config(BASE_CONFIGS[args.config])
-        
+
     # Cap Cpu Core usage
     num_cpus_to_use = args.max_cpus
+    gpu_index_to_use = args.gpu_index
     if not num_cpus_to_use:
         num_cpus_to_use = DEFAULT_MAX_CPUS
-    
+    if not gpu_index_to_use:
+        gpu_index_to_use = DEFAULT_GPU_INDEX
+        
+    # Resolve once for the whole run so every config uses the same GPU 
+    device = resolve_device(configs_to_run[0].dataset, gpu_index=gpu_index_to_use)
+
     run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     multi_run = len(configs_to_run) > 1
 
     print(f"Configs to run: {len(configs_to_run)}")
+    print(f"Using device: {device}")
     run_start_time = time.time()
     for config in tqdm(configs_to_run, desc="Grid runs", position=0, leave=True):
-        print(f"\nRunning config {config.config_id} | dp={config.use_dp} / epsilon={config.epsilon} / "
+        print(f"\nRunning config {config.config_id} | dataset={config.dataset} / dp={config.use_dp} / epsilon={config.epsilon} / "
               f"fltrust={config.use_fltrust} / topk={config.use_topk} / k={config.topk_ratio} / "
               f"attack={config.attack_type} / atkScale={config.attack_scale} / multirun={len(configs_to_run)>1}")
         print(f"\n\n{'-'*10} RUN {'-'*10}\n\n")
         start_time = time.time()
-        history = run_simulation_with_config(config, max_cpus=num_cpus_to_use)
+        history = run_simulation_with_config(config, max_cpus=num_cpus_to_use,
+                                             max_gpu_clients=args.max_gpu_clients, device=device)
         elapsed = time.time() - start_time
         save_results(config, history, elapsed, run_timestamp=run_timestamp, multi_run=multi_run)
         print(f"Elapsed for this config: {elapsed} seconds\n")

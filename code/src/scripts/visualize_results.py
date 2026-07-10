@@ -21,7 +21,10 @@ def load_results(folder: str) -> list[dict]:
         list[dict]: list of loaded result dicts, sorted by filename.
     """
     pattern = os.path.join(folder, "*.json")
-    files   = sorted(glob.glob(pattern))
+    files = sorted(
+        f for f in glob.glob(pattern)
+        if os.path.basename(f) != "run_summary.json"
+    )
 
     if not files:
         print(f"No JSON files found in {folder}")

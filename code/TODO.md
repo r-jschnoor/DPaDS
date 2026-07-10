@@ -13,7 +13,8 @@ Visualisation:
 
 
 ### What to do next
-1. Implement CIFAR-10
+1. Data folder is currently expected on executing level dir. Should be always the same place (code/data)
+2. See why trustscores still dont go high. We expect very high (maybe >60%?) trustscores for honest clients
 
 
 ### How to get to computation ressources

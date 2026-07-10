@@ -38,7 +38,7 @@ class MnistClient(fl.client.NumPyClient):
     def __init__(self, client_id, train_loader, test_loader,
                  use_dp=False, epsilon=10.0, delta=1e-5,
                  use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None,
-                 dataset_spec=get_dataset_spec("mnist")):
+                 dataset_spec=get_dataset_spec("mnist"), device=torch.device("cpu")):
         self.client_id = client_id
         self.seed = seed
         if seed is not None:
@@ -47,7 +47,8 @@ class MnistClient(fl.client.NumPyClient):
         self.train_loader = train_loader
         self.test_loader = test_loader
         self.dataset_spec = dataset_spec
-        self.model = dataset_spec.model_fn()
+        self.device = device
+        self.model = dataset_spec.model_fn().to(device)
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=0.01)
         self.loss_fn = nn.CrossEntropyLoss()
         self.use_dp = use_dp
@@ -116,7 +117,7 @@ class MnistClient(fl.client.NumPyClient):
             None
         """
         params_dict = zip(self.model.state_dict().keys(), parameters)
-        state_dict = {k: torch.tensor(v) for k, v in params_dict}       # Numpy array back to Tensor
+        state_dict = {k: torch.tensor(v, device=self.device) for k, v in params_dict}       # Numpy array back to Tensor, straight onto this client's device
         self.model.load_state_dict(state_dict, strict=True)         # Reinserts the new weights into the model. strict=True means that no extra or missing values are allowed.
 
 
@@ -151,7 +152,7 @@ class MnistClient(fl.client.NumPyClient):
 
         # Recreate privacy engine
         if self.use_dp and self.noise_multiplier is not None:
-            model_tmp = self.dataset_spec.model_fn()
+            model_tmp = self.dataset_spec.model_fn().to(self.device)
             model_tmp.load_state_dict(self.model.state_dict())
             opt_tmp = torch.optim.SGD(model_tmp.parameters(), lr=0.01)
             model_tmp, opt_tmp, train_loader, self.privacy_engine = make_private_with_noise_multiplier(
@@ -170,6 +171,7 @@ class MnistClient(fl.client.NumPyClient):
         model_tmp.train()
 
         for images, labels in train_loader:
+            images, labels = images.to(self.device), labels.to(self.device)
             opt_tmp.zero_grad()
             outputs = model_tmp(images)
             loss = self.loss_fn(outputs, labels)
@@ -250,6 +252,7 @@ class MnistClient(fl.client.NumPyClient):
         # Evaluation
         with torch.no_grad():
             for images, labels in self.test_loader:
+                images, labels = images.to(self.device), labels.to(self.device)
                 outputs = self.model(images)
                 total_loss += self.loss_fn(outputs, labels).item()
                 predicted = outputs.argmax(dim=1)

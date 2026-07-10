@@ -11,6 +11,7 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, Subset
 from sklearn.model_selection import train_test_split
 import ray
+import torch
 import os
 import warnings
 import logging
@@ -23,7 +24,9 @@ from src.models import get_dataset_spec
 
 
 # Env
-# Suppress Ray's GPU override warning -> we are not using GPU via Ray
+# Suppress Ray's GPU override warning -> most configs (MNIST) use no GPU via
+# Ray at all. CIFAR-10 configs claim one explicitly via resolve_device()
+# below instead of through this override.
 os.environ["RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO"] = "0"
 
 # Suppress the duplicate timestamp logging
@@ -34,7 +37,44 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 
-# TODO Check if trust scores work. Label flipping trust is similar to no flipping trust!
+def resolve_device(dataset: str, gpu_index: int | None = None) -> torch.device:
+    """
+    Resolve which device to train/evaluate on for this dataset.
+
+    GPU is only used for CIFAR-10. Picks the physical GPU with the most
+    free VRAM right now (or gpu_index if given) and restricts this whole
+    process (and everything it spawns, e.g. Ray workers) to only that GPU
+    via CUDA_VISIBLE_DEVICES. Call this once per script invocation, before
+    the first run_simulation_with_config() call -- not once per config --
+    and pass the result to every call, so a whole run consistently uses
+    one GPU instead of possibly a different "best" one per config as load
+    shifts on a shared multi-GPU machine.
+
+    Args:
+        dataset (str):           "mnist" or "cifar10".
+        gpu_index (int | None): manually claim this physical GPU index.
+                                None (default) auto-picks whichever GPU
+                                currently has the most free VRAM.
+
+    Returns:
+        torch.device: "cuda" if a GPU was selected, otherwise "cpu" (either
+                     dataset != "cifar10", or no GPU is available).
+    """
+    if dataset != "cifar10" or not torch.cuda.is_available():
+        return torch.device("cpu")
+
+    if gpu_index is None:
+        gpu_index = max(
+            range(torch.cuda.device_count()),
+            key=lambda i: torch.cuda.mem_get_info(i)[0],
+        )
+    elif not 0 <= gpu_index < torch.cuda.device_count():
+        raise ValueError(f"gpu_index={gpu_index} is out of range for {torch.cuda.device_count()} visible GPU(s)")
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
+    return torch.device("cuda")
+
+
 # TODO These globals are overriden in the experiment runs -> Remove or relocate!
 
 # Globals (Config)
@@ -305,7 +345,7 @@ def compute_label_distribution(train_dataset, client_pool_indices, root_indices,
     return {"root": label_counts(root_indices), "clients": clients}
 
 
-def make_evaluate_fn(test_dataset, dataset_spec=get_dataset_spec("mnist")):
+def make_evaluate_fn(test_dataset, dataset_spec=get_dataset_spec("mnist"), device=torch.device("cpu")):
     """
     Build a centralized (server-side) evaluate_fn for a Flower strategy.
 
@@ -320,13 +360,14 @@ def make_evaluate_fn(test_dataset, dataset_spec=get_dataset_spec("mnist")):
         test_dataset:                full test dataset.
         dataset_spec (DatasetSpec): model factory + class count for this run's
                                     dataset. Defaults to MNIST.
+        device (torch.device):      which device to evaluate on. Defaults to CPU.
 
     Returns:
         function: evaluate_fn(server_round, parameters, config) -> (loss, metrics),
                  the shape a Flower Strategy's evaluate_fn is expected to have.
     """
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
-    eval_client = MnistClient(client_id=-1, train_loader=None, test_loader=test_loader, dataset_spec=dataset_spec)
+    eval_client = MnistClient(client_id=-1, train_loader=None, test_loader=test_loader, dataset_spec=dataset_spec, device=device)
 
     def evaluate_fn(server_round, parameters, config):
         loss, _, metrics = eval_client.evaluate(parameters, {})
@@ -340,7 +381,7 @@ def get_client_fn(train_dataset, client_pool_indices, num_clients,
                   use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None,
                   attack_type="label_flip", attack_scale=None,
                   source_label=3, target_label=7,
-                  dataset_spec=get_dataset_spec("mnist")):
+                  dataset_spec=get_dataset_spec("mnist"), device=torch.device("cpu")):
     """
     Returns a function that creates a client with it own data slice.
 
@@ -377,6 +418,7 @@ def get_client_fn(train_dataset, client_pool_indices, num_clients,
                                  attack_type="label_flip".
         dataset_spec (DatasetSpec): model factory + class count for this run's dataset.
                                     Defaults to MNIST.
+        device (torch.device):      which device clients train/evaluate on. Defaults to CPU.
 
     Returns:
         function: client_fn(context) -> flwr.client.Client
@@ -424,7 +466,7 @@ def get_client_fn(train_dataset, client_pool_indices, num_clients,
                 use_dp=use_dp, epsilon=epsilon, delta=delta,
                 use_topk=use_topk, topk_ratio=topk_ratio,
                 num_rounds=num_rounds, seed=seed,
-                dataset_spec=dataset_spec,
+                dataset_spec=dataset_spec, device=device,
             ).to_client()
 
         return MnistClient(
@@ -432,7 +474,7 @@ def get_client_fn(train_dataset, client_pool_indices, num_clients,
             use_dp=use_dp, epsilon=epsilon, delta=delta,
             use_topk=use_topk, topk_ratio=topk_ratio,
             num_rounds=num_rounds, seed=seed,
-            dataset_spec=dataset_spec,
+            dataset_spec=dataset_spec, device=device,
         ).to_client()
     
     return client_fn
@@ -533,7 +575,8 @@ def weighted_average_metrics(metrics):
     return aggregated
 
 
-def run_simulation_with_config(config: ExperimentConfig, max_cpus: int | None = None):
+def run_simulation_with_config(config: ExperimentConfig, max_cpus: int | None = None,
+                               max_gpu_clients: int = 4, device: torch.device | None = None):
     """
     Run one FL simulation with the given experiment config.
 
@@ -544,6 +587,19 @@ def run_simulation_with_config(config: ExperimentConfig, max_cpus: int | None = 
                                    at most max_cpus clients run concurrently regardless of
                                    how many cores the host has. None (default) leaves Ray's
                                    own auto-detection (all host cores) unchanged.
+        max_gpu_clients (int):     when a GPU is used (see resolve_device() -- CIFAR-10
+                                   only), caps how many simulated clients share it
+                                   concurrently (Ray's fractional-GPU scheduling, via
+                                   client_resources["num_gpus"] = 1/max_gpu_clients).
+                                   A GPU doesn't parallelize across processes the way
+                                   CPU cores do, so this bounds contention/VRAM use on
+                                   the single physical GPU resolve_device() selects.
+                                   Ignored entirely for MNIST (no GPU used at all).
+        device (torch.device | None): device to train/evaluate on, pre-resolved via
+                                   resolve_device() by the caller. Resolve once per script
+                                   invocation (not once per config) so a whole sweep
+                                   consistently uses the same GPU. None (default) resolves
+                                   internally for standalone/ad-hoc calls.
 
     Returns:
         flwr History object containing per-round metrics.
@@ -552,6 +608,8 @@ def run_simulation_with_config(config: ExperimentConfig, max_cpus: int | None = 
         set_seed(config.seed)
 
     dataset_spec = get_dataset_spec(config.dataset)
+    if device is None:
+        device = resolve_device(config.dataset)
 
     train_dataset, test_dataset, root_loader, client_pool_indices = load_datasets(
         config.root_dataset_size, seed=config.seed, dataset=config.dataset,
@@ -571,7 +629,7 @@ def run_simulation_with_config(config: ExperimentConfig, max_cpus: int | None = 
     # Shared state manager to persist states across rounds
     accountant_manager = AccountantStateManager() if config.use_dp else None
 
-    evaluate_fn = make_evaluate_fn(test_dataset, dataset_spec=dataset_spec)
+    evaluate_fn = make_evaluate_fn(test_dataset, dataset_spec=dataset_spec, device=device)
 
     # Without a seed, Flower asks a random client for the initial global
     # model (Server._get_initial_parameters -> ClientManager.sample(),
@@ -591,7 +649,7 @@ def run_simulation_with_config(config: ExperimentConfig, max_cpus: int | None = 
             accountant_manager=accountant_manager,
             root_loader=root_loader,
             rescale_to_ref_norm=config.rescale_to_ref_norm,
-            dataset_spec=dataset_spec,
+            dataset_spec=dataset_spec, device=device,
             fraction_fit=1.0,
             fraction_evaluate=0.0,           # Skip federated eval -- evaluate_fn does it centrally instead
             evaluate_fn=evaluate_fn,
@@ -630,7 +688,7 @@ def run_simulation_with_config(config: ExperimentConfig, max_cpus: int | None = 
             num_rounds=config.num_rounds, seed=config.seed,
             attack_type=config.attack_type, attack_scale=config.attack_scale,
             source_label=config.source_label, target_label=config.target_label,
-            dataset_spec=dataset_spec,
+            dataset_spec=dataset_spec, device=device,
         )
     )
     server_app = ServerApp(server_fn=server_fn)
@@ -639,12 +697,17 @@ def run_simulation_with_config(config: ExperimentConfig, max_cpus: int | None = 
     if max_cpus is not None:
         init_args["num_cpus"] = max_cpus
 
+    # A GPU doesn't parallelize across processes the way CPU cores do so
+    # cap how many simulated clients share the single physical GPU
+    # resolve_device() selected, via Ray's fractional-GPU scheduling.
+    client_num_gpus = 1 / max_gpu_clients if device.type == "cuda" else 0.0
+
     fl.simulation.run_simulation(
         server_app=server_app,
         client_app=client_app,
         num_supernodes=config.num_clients,
         backend_config={
-            "client_resources": {"num_cpus": 1, "num_gpus": 0.0},
+            "client_resources": {"num_cpus": 1, "num_gpus": client_num_gpus},
             "init_args": init_args,
         },
     )

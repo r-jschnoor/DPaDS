@@ -64,9 +64,11 @@ def get_reference_update(model, root_loader, optimizer, loss_fn, num_epochs=3):
     ])
 
     # A few epochs of training on root data
+    device = next(model.parameters()).device
     model.train()
     for _ in range(num_epochs):
         for images, labels in root_loader:
+            images, labels = images.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = model(images)
             loss = loss_fn(outputs, labels)
@@ -103,18 +105,21 @@ class FLTrustStrategy(FedAvg):
                                     each round. Defaults to 3.
         dataset_spec (DatasetSpec): model factory + class count for this run's
                                     dataset. Defaults to MNIST.
+        device (torch.device):      which device to train the reference model on.
+                                    Defaults to CPU.
         **kwargs:                   passed through to FedAvg (e.g.
                                     fraction_fit, min_available_clients).
     """
 
     def  __init__(self, root_loader, rescale_to_ref_norm=False, ref_num_epochs=3,
-                 dataset_spec=get_dataset_spec("mnist"), **kwargs):
+                 dataset_spec=get_dataset_spec("mnist"), device=torch.device("cpu"), **kwargs):
         super().__init__(**kwargs)
         self.root_loader = root_loader
         self.rescale_to_ref_norm=rescale_to_ref_norm
         self.ref_num_epochs = ref_num_epochs
         self.dataset_spec = dataset_spec
-        self.ref_model = dataset_spec.model_fn()
+        self.device = device
+        self.ref_model = dataset_spec.model_fn().to(device)
         self.ref_optimizer = torch.optim.SGD(self.ref_model.parameters(), lr=0.01)
         self.loss_fn = nn.CrossEntropyLoss()
         self.saved_global_parameters = None
@@ -143,7 +148,7 @@ class FLTrustStrategy(FedAvg):
         
         server_state_parameters = self.saved_global_parameters
         parameters_dict = zip(self.ref_model.state_dict().keys(), server_state_parameters)
-        state_dict = {k: torch.tensor(v) for k, v in parameters_dict}
+        state_dict = {k: torch.tensor(v, device=self.device) for k, v in parameters_dict}
         self.ref_model.load_state_dict(state_dict, strict=True)
         # Reset optimizer as per paper
         self.ref_optimizer = torch.optim.SGD(self.ref_model.parameters(), lr=0.01)

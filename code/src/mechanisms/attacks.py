@@ -32,15 +32,16 @@ class LabelFlipClient(MnistClient):
                                randomness. None keeps the unseeded (different every run) behavior.
         dataset_spec (DatasetSpec): model factory + class count for this run's dataset.
                                     Defaults to MNIST.
+        device (torch.device):  which device to train/evaluate on. Defaults to CPU.
     """
 
     def __init__(self, client_id, train_loader, test_loader,
                  source_label=7, target_label=1, use_dp=False, epsilon=10.0, delta=1e-5,
                  use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None,
-                 dataset_spec=get_dataset_spec("mnist")):
+                 dataset_spec=get_dataset_spec("mnist"), device=torch.device("cpu")):
         super().__init__(client_id, train_loader, test_loader, use_dp, epsilon, delta,
                          use_topk=use_topk, topk_ratio=topk_ratio, num_rounds=num_rounds, seed=seed,
-                         dataset_spec=dataset_spec)
+                         dataset_spec=dataset_spec, device=device)
         self.source_label = source_label
         self.target_label = target_label
         self.is_malicious = True
@@ -69,7 +70,7 @@ class LabelFlipClient(MnistClient):
 
         # Recreate privacy engine
         if self.use_dp and self.noise_multiplier is not None:
-            model_tmp = self.dataset_spec.model_fn()
+            model_tmp = self.dataset_spec.model_fn().to(self.device)
             model_tmp.load_state_dict(self.model.state_dict())
             opt_tmp = torch.optim.SGD(model_tmp.parameters(), lr=0.01)
             model_tmp, opt_tmp, train_loader, self.privacy_engine = make_private_with_noise_multiplier(
@@ -88,6 +89,7 @@ class LabelFlipClient(MnistClient):
         model_tmp.train()
 
         for images, labels in train_loader:
+            images, labels = images.to(self.device), labels.to(self.device)
             # Flip source_label <-> target_label
             # TODO Try to use other numbers
             source_mask = labels == self.source_label
@@ -168,15 +170,18 @@ class RandomGradientClient(MnistClient):
                                     Defaults to MNIST. Only the DP path (via
                                     super().fit()) ever constructs a model, so this
                                     is just forwarded, never used directly here.
+        device (torch.device):  which device to train on. Defaults to CPU. Only the
+                                DP path (via super().fit()) ever touches this directly;
+                                the no-DP path works on plain numpy arrays.
     """
 
     def __init__(self, client_id, train_loader, test_loader,
                  use_dp=False, epsilon=10.0, delta=1e-5,
                  use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None,
-                 dataset_spec=get_dataset_spec("mnist")):
+                 dataset_spec=get_dataset_spec("mnist"), device=torch.device("cpu")):
         super().__init__(client_id, train_loader, test_loader, use_dp, epsilon, delta,
                          use_topk=use_topk, topk_ratio=topk_ratio, num_rounds=num_rounds, seed=seed,
-                         dataset_spec=dataset_spec)
+                         dataset_spec=dataset_spec, device=device)
         self.is_malicious = True
 
 
@@ -292,7 +297,7 @@ def build_malicious_client(client_id, train_loader, test_loader, attack_type, at
                            source_label=3, target_label=7,
                            use_dp=False, epsilon=10.0, delta=1e-5,
                            use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None,
-                           dataset_spec=get_dataset_spec("mnist")):
+                           dataset_spec=get_dataset_spec("mnist"), device=torch.device("cpu")):
     """
     Construct the malicious client for one Byzantine slot.
 
@@ -322,6 +327,7 @@ def build_malicious_client(client_id, train_loader, test_loader, attack_type, at
                                randomness. None keeps the unseeded (different every run) behavior.
         dataset_spec (DatasetSpec): model factory + class count for this run's dataset.
                                     Defaults to MNIST.
+        device (torch.device):  which device to train/evaluate on. Defaults to CPU.
 
     Returns:
         MnistClient: the constructed malicious client (not yet .to_client()'d).
@@ -333,7 +339,7 @@ def build_malicious_client(client_id, train_loader, test_loader, attack_type, at
         use_dp=use_dp, epsilon=epsilon, delta=delta,
         use_topk=use_topk, topk_ratio=topk_ratio,
         num_rounds=num_rounds, seed=seed,
-        dataset_spec=dataset_spec,
+        dataset_spec=dataset_spec, device=device,
     )
     if attack_type == "label_flip":
         kwargs.update(source_label=source_label, target_label=target_label)
