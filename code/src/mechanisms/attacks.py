@@ -4,6 +4,7 @@ import torch
 from src.client import MnistClient, set_seed
 from src.mechanisms.dp import get_privacy_spent, make_private_with_noise_multiplier, restore_accountant_state, serialize_accountant_state
 from src.mechanisms.topk import topk_sparsify, unflatten
+from src.models import get_dataset_spec
 from src.models.mnist_cnn import MnistCNN
 
 
@@ -21,21 +22,25 @@ class LabelFlipClient(MnistClient):
         client_id (int):       unique client identifier.
         train_loader:          local training dataloader.
         test_loader:           local test dataloader.
-        source_label (int):    the digit to relabel (e.g. 7).
-        target_label (int):    the digit to relabel it as (e.g. 1).
+        source_label (int):    the class index to relabel (e.g. 7).
+        target_label (int):    the class index to relabel it as (e.g. 1).
         use_dp (bool):         whether to wrap training with DP-SGD.
         epsilon (float):       privacy budget. Only used when use_dp=True.
         delta (float):         privacy failure probability. Only used when use_dp=True.
         num_rounds (int):      number of training rounds (each with 1 epoch) planned.
         seed (int | None):     random seed for reproducible model init and per-round training
                                randomness. None keeps the unseeded (different every run) behavior.
+        dataset_spec (DatasetSpec): model factory + class count for this run's dataset.
+                                    Defaults to MNIST.
     """
 
     def __init__(self, client_id, train_loader, test_loader,
                  source_label=7, target_label=1, use_dp=False, epsilon=10.0, delta=1e-5,
-                 use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None):
+                 use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None,
+                 dataset_spec=get_dataset_spec("mnist")):
         super().__init__(client_id, train_loader, test_loader, use_dp, epsilon, delta,
-                         use_topk=use_topk, topk_ratio=topk_ratio, num_rounds=num_rounds, seed=seed)
+                         use_topk=use_topk, topk_ratio=topk_ratio, num_rounds=num_rounds, seed=seed,
+                         dataset_spec=dataset_spec)
         self.source_label = source_label
         self.target_label = target_label
         self.is_malicious = True
@@ -64,7 +69,7 @@ class LabelFlipClient(MnistClient):
 
         # Recreate privacy engine
         if self.use_dp and self.noise_multiplier is not None:
-            model_tmp = MnistCNN()
+            model_tmp = self.dataset_spec.model_fn()
             model_tmp.load_state_dict(self.model.state_dict())
             opt_tmp = torch.optim.SGD(model_tmp.parameters(), lr=0.01)
             model_tmp, opt_tmp, train_loader, self.privacy_engine = make_private_with_noise_multiplier(
@@ -159,13 +164,19 @@ class RandomGradientClient(MnistClient):
         num_rounds (int):      number of training rounds (each with 1 epoch) planned.
         seed (int | None):     random seed for reproducible model init and per-round training
                                randomness. None keeps the unseeded (different every run) behavior.
+        dataset_spec (DatasetSpec): model factory + class count for this run's dataset.
+                                    Defaults to MNIST. Only the DP path (via
+                                    super().fit()) ever constructs a model, so this
+                                    is just forwarded, never used directly here.
     """
 
     def __init__(self, client_id, train_loader, test_loader,
                  use_dp=False, epsilon=10.0, delta=1e-5,
-                 use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None):
+                 use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None,
+                 dataset_spec=get_dataset_spec("mnist")):
         super().__init__(client_id, train_loader, test_loader, use_dp, epsilon, delta,
-                         use_topk=use_topk, topk_ratio=topk_ratio, num_rounds=num_rounds, seed=seed)
+                         use_topk=use_topk, topk_ratio=topk_ratio, num_rounds=num_rounds, seed=seed,
+                         dataset_spec=dataset_spec)
         self.is_malicious = True
 
 
@@ -280,7 +291,8 @@ ATTACK_CLASSES = {
 def build_malicious_client(client_id, train_loader, test_loader, attack_type, attack_scale,
                            source_label=3, target_label=7,
                            use_dp=False, epsilon=10.0, delta=1e-5,
-                           use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None):
+                           use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None,
+                           dataset_spec=get_dataset_spec("mnist")):
     """
     Construct the malicious client for one Byzantine slot.
 
@@ -296,9 +308,9 @@ def build_malicious_client(client_id, train_loader, test_loader, attack_type, at
         attack_scale (float | None): None or 1.0 for the base (unscaled)
                                      attack, otherwise the scale factor for
                                      the wrapped (Scaled*) variant.
-        source_label (int):    the digit to relabel. Only used when
+        source_label (int):    the class index to relabel. Only used when
                                attack_type="label_flip".
-        target_label (int):    the digit to relabel it as. Only used when
+        target_label (int):    the class index to relabel it as. Only used when
                                attack_type="label_flip".
         use_dp (bool):         whether to wrap training with DP-SGD.
         epsilon (float):       privacy budget. Only used when use_dp=True.
@@ -308,6 +320,8 @@ def build_malicious_client(client_id, train_loader, test_loader, attack_type, at
         num_rounds (int):      number of training rounds (each with 1 epoch) planned.
         seed (int | None):     random seed for reproducible model init and per-round training
                                randomness. None keeps the unseeded (different every run) behavior.
+        dataset_spec (DatasetSpec): model factory + class count for this run's dataset.
+                                    Defaults to MNIST.
 
     Returns:
         MnistClient: the constructed malicious client (not yet .to_client()'d).
@@ -319,6 +333,7 @@ def build_malicious_client(client_id, train_loader, test_loader, attack_type, at
         use_dp=use_dp, epsilon=epsilon, delta=delta,
         use_topk=use_topk, topk_ratio=topk_ratio,
         num_rounds=num_rounds, seed=seed,
+        dataset_spec=dataset_spec,
     )
     if attack_type == "label_flip":
         kwargs.update(source_label=source_label, target_label=target_label)

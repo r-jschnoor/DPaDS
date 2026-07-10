@@ -1,5 +1,6 @@
 # Constants
 NUM_CLASSES_MNIST = 10
+NUM_CLASSES_CIFAR10 = 10
 
 # Keys
 ACCURACY_KEY = "accuracy"

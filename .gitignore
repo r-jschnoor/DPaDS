@@ -42,3 +42,5 @@
 .venv/
 CLAUDE.md
 .claude
+
+code/data/*.tar.gz

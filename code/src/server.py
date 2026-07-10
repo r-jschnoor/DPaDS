@@ -19,7 +19,7 @@ from src.client import MnistClient, set_seed
 from src.experiment_config import ExperimentConfig
 from src.mechanisms.attacks import build_malicious_client
 from src.mechanisms.robust_aggregation import FLTrustStrategy
-from src.models.mnist_cnn import MnistCNN
+from src.models import get_dataset_spec
 
 
 # Env
@@ -205,9 +205,9 @@ class AccountantStateManager:
         return self._state.get(node_id)
 
 
-def load_datasets(root_dataset_size, seed=None):
+def load_datasets(root_dataset_size, seed=None, dataset="mnist"):
     """
-    Loader MNIST train/test datasets and create the server root loader.
+    Load train/test datasets and create the server root loader.
 
     The root set is a stratified sample (same class proportions as the
     full training set) so every label is represented, and it is disjoint
@@ -220,6 +220,10 @@ def load_datasets(root_dataset_size, seed=None):
                                  keeps the unseeded (different every run)
                                  behavior; configs sharing the same seed get
                                  the same split.
+        dataset (str):           "mnist" or "cifar10". Normalization is
+                                 deliberately the simplified (0.5,...) form
+                                 for both, rather than each dataset's "true"
+                                 per-channel statistics
 
     Returns:
         tuple: (train_dataset, test_dataset, root_loader, client_pool_indices)
@@ -227,12 +231,20 @@ def load_datasets(root_dataset_size, seed=None):
                                                used for the root set, for
                                                clients to slice from.
     """
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,))
-    ])
-    train_dataset = datasets.MNIST(root="data/", train=True,  download=True, transform=transform)
-    test_dataset  = datasets.MNIST(root="data/", train=False, download=True, transform=transform)
+    if dataset == "cifar10":
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ])
+        train_dataset = datasets.CIFAR10(root="data/", train=True,  download=True, transform=transform)
+        test_dataset  = datasets.CIFAR10(root="data/", train=False, download=True, transform=transform)
+    else:
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,))
+        ])
+        train_dataset = datasets.MNIST(root="data/", train=True,  download=True, transform=transform)
+        test_dataset  = datasets.MNIST(root="data/", train=False, download=True, transform=transform)
 
     # Stratified split -> root_indices has every label represented in the
     # same proportions as the full training set. client_pool_indices is
@@ -293,7 +305,7 @@ def compute_label_distribution(train_dataset, client_pool_indices, root_indices,
     return {"root": label_counts(root_indices), "clients": clients}
 
 
-def make_evaluate_fn(test_dataset):
+def make_evaluate_fn(test_dataset, dataset_spec=get_dataset_spec("mnist")):
     """
     Build a centralized (server-side) evaluate_fn for a Flower strategy.
 
@@ -305,14 +317,16 @@ def make_evaluate_fn(test_dataset):
     instead of duplicating its accuracy/confusion-matrix logic.
 
     Args:
-        test_dataset: full MNIST test dataset.
+        test_dataset:                full test dataset.
+        dataset_spec (DatasetSpec): model factory + class count for this run's
+                                    dataset. Defaults to MNIST.
 
     Returns:
         function: evaluate_fn(server_round, parameters, config) -> (loss, metrics),
                  the shape a Flower Strategy's evaluate_fn is expected to have.
     """
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
-    eval_client = MnistClient(client_id=-1, train_loader=None, test_loader=test_loader)
+    eval_client = MnistClient(client_id=-1, train_loader=None, test_loader=test_loader, dataset_spec=dataset_spec)
 
     def evaluate_fn(server_round, parameters, config):
         loss, _, metrics = eval_client.evaluate(parameters, {})
@@ -325,7 +339,8 @@ def get_client_fn(train_dataset, client_pool_indices, num_clients,
                   num_byzantine=0, use_dp=False, epsilon=10.0, delta=1e-5,
                   use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None,
                   attack_type="label_flip", attack_scale=None,
-                  source_label=3, target_label=7):
+                  source_label=3, target_label=7,
+                  dataset_spec=get_dataset_spec("mnist")):
     """
     Returns a function that creates a client with it own data slice.
 
@@ -356,10 +371,12 @@ def get_client_fn(train_dataset, client_pool_indices, num_clients,
                                  "random_gradient".
         attack_scale (float | None): None or 1.0 for the base (unscaled) attack, otherwise the
                                      scale factor for the wrapped (Scaled*) variant.
-        source_label (int):      the digit malicious clients relabel. Only used when
+        source_label (int):      the class index malicious clients relabel. Only used when
                                  attack_type="label_flip".
-        target_label (int):      the digit malicious clients relabel it as. Only used when
+        target_label (int):      the class index malicious clients relabel it as. Only used when
                                  attack_type="label_flip".
+        dataset_spec (DatasetSpec): model factory + class count for this run's dataset.
+                                    Defaults to MNIST.
 
     Returns:
         function: client_fn(context) -> flwr.client.Client
@@ -407,6 +424,7 @@ def get_client_fn(train_dataset, client_pool_indices, num_clients,
                 use_dp=use_dp, epsilon=epsilon, delta=delta,
                 use_topk=use_topk, topk_ratio=topk_ratio,
                 num_rounds=num_rounds, seed=seed,
+                dataset_spec=dataset_spec,
             ).to_client()
 
         return MnistClient(
@@ -414,21 +432,25 @@ def get_client_fn(train_dataset, client_pool_indices, num_clients,
             use_dp=use_dp, epsilon=epsilon, delta=delta,
             use_topk=use_topk, topk_ratio=topk_ratio,
             num_rounds=num_rounds, seed=seed,
+            dataset_spec=dataset_spec,
         ).to_client()
     
     return client_fn
 
 
-def get_server_fn(root_loader, test_dataset, use_rescale_to_ref_norm, use_fltrust, num_clients, num_rounds):
+def get_server_fn(root_loader, test_dataset, use_rescale_to_ref_norm, use_fltrust, num_clients, num_rounds,
+                  dataset_spec=get_dataset_spec("mnist")):
     """
     Return a function that creates a ServerComponents object.
 
     Args:
         root_loader (DataLoader): small clean server-held dataset.
-        test_dataset:             full MNIST test dataset, for centralized evaluation.
+        test_dataset:             full test dataset, for centralized evaluation.
         use_fltrust (bool):       whether to use FLTrust or plain FedAvg.
         num_clients (int):        total number of clients.
         num_rounds (int):         number of FL rounds.
+        dataset_spec (DatasetSpec): model factory + class count for this run's
+                                    dataset. Defaults to MNIST.
 
     Returns:
         function: server_fn(context) -> ServerAppComponents
@@ -443,7 +465,7 @@ def get_server_fn(root_loader, test_dataset, use_rescale_to_ref_norm, use_fltrus
         Returns:
             ServerAppComponents: strategy and config bundled for Flower.
         """
-        evaluate_fn = make_evaluate_fn(test_dataset)
+        evaluate_fn = make_evaluate_fn(test_dataset, dataset_spec=dataset_spec)
 
         # Clients need server_round in their fit config for round-aware
         # seeding (see client.py set_seed usage).
@@ -453,6 +475,7 @@ def get_server_fn(root_loader, test_dataset, use_rescale_to_ref_norm, use_fltrus
             aggregation_strategy = FLTrustStrategy(
                 root_loader=root_loader,
                 rescale_to_ref_norm=use_rescale_to_ref_norm,
+                dataset_spec=dataset_spec,
                 fraction_fit=1.0,
                 fraction_evaluate=0.0,           # Skip federated eval -- evaluate_fn does it centrally instead
                 evaluate_fn=evaluate_fn,
@@ -510,12 +533,17 @@ def weighted_average_metrics(metrics):
     return aggregated
 
 
-def run_simulation_with_config(config: ExperimentConfig):
+def run_simulation_with_config(config: ExperimentConfig, max_cpus: int | None = None):
     """
     Run one FL simulation with the given experiment config.
 
     Args:
         config (ExperimentConfig): experiment configuration.
+        max_cpus (int | None):     caps the total number of CPU cores Ray uses for this
+                                   simulation, so
+                                   at most max_cpus clients run concurrently regardless of
+                                   how many cores the host has. None (default) leaves Ray's
+                                   own auto-detection (all host cores) unchanged.
 
     Returns:
         flwr History object containing per-round metrics.
@@ -523,7 +551,11 @@ def run_simulation_with_config(config: ExperimentConfig):
     if config.seed is not None:
         set_seed(config.seed)
 
-    train_dataset, test_dataset, root_loader, client_pool_indices = load_datasets(config.root_dataset_size, seed=config.seed)
+    dataset_spec = get_dataset_spec(config.dataset)
+
+    train_dataset, test_dataset, root_loader, client_pool_indices = load_datasets(
+        config.root_dataset_size, seed=config.seed, dataset=config.dataset,
+    )
 
     # Track history
     run_history = {
@@ -539,7 +571,7 @@ def run_simulation_with_config(config: ExperimentConfig):
     # Shared state manager to persist states across rounds
     accountant_manager = AccountantStateManager() if config.use_dp else None
 
-    evaluate_fn = make_evaluate_fn(test_dataset)
+    evaluate_fn = make_evaluate_fn(test_dataset, dataset_spec=dataset_spec)
 
     # Without a seed, Flower asks a random client for the initial global
     # model (Server._get_initial_parameters -> ClientManager.sample(),
@@ -549,7 +581,7 @@ def run_simulation_with_config(config: ExperimentConfig):
     # uses exactly this.
     initial_parameters = None
     if config.seed is not None:
-        initial_ndarrays = [val.cpu().numpy() for _, val in MnistCNN().state_dict().items()]
+        initial_ndarrays = [val.cpu().numpy() for _, val in dataset_spec.model_fn().state_dict().items()]
         initial_parameters = ndarrays_to_parameters(initial_ndarrays)
 
     # Strategies with tracking
@@ -559,6 +591,7 @@ def run_simulation_with_config(config: ExperimentConfig):
             accountant_manager=accountant_manager,
             root_loader=root_loader,
             rescale_to_ref_norm=config.rescale_to_ref_norm,
+            dataset_spec=dataset_spec,
             fraction_fit=1.0,
             fraction_evaluate=0.0,           # Skip federated eval -- evaluate_fn does it centrally instead
             evaluate_fn=evaluate_fn,
@@ -597,9 +630,14 @@ def run_simulation_with_config(config: ExperimentConfig):
             num_rounds=config.num_rounds, seed=config.seed,
             attack_type=config.attack_type, attack_scale=config.attack_scale,
             source_label=config.source_label, target_label=config.target_label,
+            dataset_spec=dataset_spec,
         )
     )
     server_app = ServerApp(server_fn=server_fn)
+
+    init_args = {"log_to_driver": True}
+    if max_cpus is not None:
+        init_args["num_cpus"] = max_cpus
 
     fl.simulation.run_simulation(
         server_app=server_app,
@@ -607,7 +645,7 @@ def run_simulation_with_config(config: ExperimentConfig):
         num_supernodes=config.num_clients,
         backend_config={
             "client_resources": {"num_cpus": 1, "num_gpus": 0.0},
-            "init_args": {"log_to_driver": True},
+            "init_args": init_args,
         },
     )
 

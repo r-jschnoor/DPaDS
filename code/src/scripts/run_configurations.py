@@ -9,8 +9,8 @@ import time
 from sklearn.metrics import confusion_matrix
 from tqdm import tqdm
 
-from src.constants import NUM_CLASSES_MNIST
 from src.experiment_config import ExperimentConfig
+from src.models import get_dataset_spec
 from src.server import run_simulation_with_config
 
 # --------- Global setup ----------
@@ -20,11 +20,11 @@ RESULTS_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__f
 
 # Shared parameters across all experiments
 SHARED_PARAMS = dict(
-    num_clients = 50,
-    num_rounds = 50,
-    num_byzantine = 20,
+    num_clients = 10,
+    num_rounds = 5,
+    num_byzantine = 2,
     root_dataset_size = 1000,
-    rescale_to_ref_norm = True,
+    rescale_to_ref_norm = False,
     seed = 42,  # Same data split + initial model across a config sweep, so
                 # only the parameter actually variy (epsilon, topk_ratio,
                 # etc.) explains any accuracy difference between variants.
@@ -36,6 +36,8 @@ SHARED_PARAMS = dict(
     source_label = 3,             # Only used when attack_type="label_flip".
     target_label = 7,
 )
+
+DEFAULT_MAX_CPUS = 25
 
 
 BASE_CONFIGS = {
@@ -125,6 +127,7 @@ def make_filename(config: ExperimentConfig, run_timestamp: str) -> str:
     """
     parts = [
         run_timestamp,
+        f"dataset-{config.dataset}",
         f"config-{config.config_id}",
         f"dp-{config.use_dp}"
     ]
@@ -147,32 +150,33 @@ def make_filename(config: ExperimentConfig, run_timestamp: str) -> str:
     return "_".join(parts) + ".json"
 
 
-def inflate_confusion_matrix_mnist_and_calculate_scores(config: ExperimentConfig, history: dict):
+def inflate_confusion_matrix_and_calculate_scores(config: ExperimentConfig, history: dict):
     """
     Reconstruct confusion matrix and compute per-class metrics from history.
 
     Extracts the flat cm_i_j metrics from the final round of the distributed
-    evaluate history, reconstructs the full 10x10 confusion matrix, and
-    computes precision, recall and F1 score per digit class.
+    evaluate history, reconstructs the full num_classes x num_classes confusion
+    matrix, and computes precision, recall and F1 score per class.
 
     Args:
         config (ExperimentConfig): experiment configuration, used for num_rounds
-                                   and num_classes.
+                                   and dataset (-> num_classes).
         history (dict):            run history from run_simulation_with_config,
                                    must contain metrics_distributed_evaluate
                                    with cm_i_j keys.
 
     Returns:
         tuple: (per_class, confusion_matrix)
-            - per_class (dict | None):        dict mapping digit class (str) to
+            - per_class (dict | None):        dict mapping class (str) to
                                               precision, recall and f1 scores.
                                               None if no cm_ entries found.
-            - confusion_matrix (list | None): 10x10 list of lists where
-                                              confusion_matrix[i][j] is the count
-                                              of samples with true label i
-                                              predicted as j.
+            - confusion_matrix (list | None): num_classes x num_classes list of
+                                              lists where confusion_matrix[i][j]
+                                              is the count of samples with true
+                                              label i predicted as j.
                                               None if no cm_ entries found.
     """
+    num_classes = get_dataset_spec(config.dataset).num_classes
     last_round = config.num_rounds
     cm_entries = {
         key: dict(vals).get(last_round)
@@ -182,18 +186,18 @@ def inflate_confusion_matrix_mnist_and_calculate_scores(config: ExperimentConfig
     confusion_matrix = None
     if cm_entries:
         confusion_matrix = [
-            [int(cm_entries.get(f"cm_{i}_{j}", 0) or 0) for j in range(NUM_CLASSES_MNIST)]
-            for i in range(NUM_CLASSES_MNIST)
+            [int(cm_entries.get(f"cm_{i}_{j}", 0) or 0) for j in range(num_classes)]
+            for i in range(num_classes)
         ]
 
     # Compute per-class metrics from confusion matrix
     per_class = None
     if confusion_matrix:
         per_class = {}
-        for i in range(NUM_CLASSES_MNIST):
+        for i in range(num_classes):
             tp = confusion_matrix[i][i]
-            fp = sum(confusion_matrix[r][i] for r in range(NUM_CLASSES_MNIST)) - tp
-            fn = sum(confusion_matrix[i][c] for c in range(NUM_CLASSES_MNIST)) - tp
+            fp = sum(confusion_matrix[r][i] for r in range(num_classes)) - tp
+            fn = sum(confusion_matrix[i][c] for c in range(num_classes)) - tp
             precision  = tp / (tp + fp) if (tp + fp) > 0 else 0.0
             recall     = tp / (tp + fn) if (tp + fn) > 0 else 0.0
             f1         = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
@@ -252,11 +256,12 @@ def save_results(config: ExperimentConfig, history,
         if per_round:
             malicious_clients[node_id] = bool(per_round[0][1])
 
-    per_class_scores, confusion_matrix = inflate_confusion_matrix_mnist_and_calculate_scores(config, history)
+    per_class_scores, confusion_matrix = inflate_confusion_matrix_and_calculate_scores(config, history)
 
     results = {
         "config": {
             "config_id": config.config_id,
+            "dataset": config.dataset,
             "num_clients": config.num_clients,
             "num_rounds": config.num_rounds,
             "num_byzantine": config.num_byzantine,
@@ -359,6 +364,9 @@ if __name__ == "__main__":
                        metavar="N", help="run config N (1-8)")
     group.add_argument("--all", action="store_true",
                        help="run all configs sequentially")
+    parser.add_argument("--max-cpus", type=int, default=DEFAULT_MAX_CPUS, metavar="N",
+                        help=f"cap the number of CPU cores Ray uses for every config in "
+                             f"this invocation (default: {DEFAULT_MAX_CPUS})")
     args = parser.parse_args(args=None if len(sys.argv) > 1 else ["--help"])
 
     if args.all:
@@ -366,6 +374,11 @@ if __name__ == "__main__":
                           for c in expand_config(base)]
     else:
         configs_to_run = expand_config(BASE_CONFIGS[args.config])
+        
+    # Cap Cpu Core usage
+    num_cpus_to_use = args.max_cpus
+    if not num_cpus_to_use:
+        num_cpus_to_use = DEFAULT_MAX_CPUS
     
     run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     multi_run = len(configs_to_run) > 1
@@ -375,10 +388,10 @@ if __name__ == "__main__":
     for config in tqdm(configs_to_run, desc="Grid runs", position=0, leave=True):
         print(f"\nRunning config {config.config_id} | dp={config.use_dp} / epsilon={config.epsilon} / "
               f"fltrust={config.use_fltrust} / topk={config.use_topk} / k={config.topk_ratio} / "
-              f"multirun={len(configs_to_run)>1}")
+              f"attack={config.attack_type} / atkScale={config.attack_scale} / multirun={len(configs_to_run)>1}")
         print(f"\n\n{'-'*10} RUN {'-'*10}\n\n")
         start_time = time.time()
-        history = run_simulation_with_config(config)
+        history = run_simulation_with_config(config, max_cpus=num_cpus_to_use)
         elapsed = time.time() - start_time
         save_results(config, history, elapsed, run_timestamp=run_timestamp, multi_run=multi_run)
         print(f"Elapsed for this config: {elapsed} seconds\n")

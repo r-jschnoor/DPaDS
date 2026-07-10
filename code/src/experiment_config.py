@@ -10,6 +10,9 @@ class ExperimentConfig:
 
     Args:
         config_id (int):         which of the 8 combos this is.
+        dataset (str):           "mnist" or "cifar10". Selects which torchvision dataset,
+                                 normalization, and model architecture (see
+                                 src.models.get_dataset_spec) this run uses.
         num_clients (int):       total number of simulated clients.
         num_rounds (int):        number of FL rounds.
         num_byzantine (int):     number of malicious clients.
@@ -37,6 +40,7 @@ class ExperimentConfig:
                                 attack_type="label_flip".
     """
     config_id:          int
+    dataset:            str   = "mnist"
     num_clients:        int   = 4
     num_rounds:         int   = 10
     num_byzantine:      int   = 1

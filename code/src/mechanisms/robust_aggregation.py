@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from flwr.server.strategy import FedAvg
 from flwr.common import parameters_to_ndarrays, ndarrays_to_parameters
 
+from src.models import get_dataset_spec
 from src.models.mnist_cnn import MnistCNN
 
 
@@ -100,16 +101,20 @@ class FLTrustStrategy(FedAvg):
         root_loader (DataLoader):   small clean server-held dataset.
         ref_num_epochs (int):       epochs to train the reference model for
                                     each round. Defaults to 3.
+        dataset_spec (DatasetSpec): model factory + class count for this run's
+                                    dataset. Defaults to MNIST.
         **kwargs:                   passed through to FedAvg (e.g.
                                     fraction_fit, min_available_clients).
     """
 
-    def  __init__(self, root_loader, rescale_to_ref_norm=False, ref_num_epochs=3, **kwargs):
+    def  __init__(self, root_loader, rescale_to_ref_norm=False, ref_num_epochs=3,
+                 dataset_spec=get_dataset_spec("mnist"), **kwargs):
         super().__init__(**kwargs)
         self.root_loader = root_loader
         self.rescale_to_ref_norm=rescale_to_ref_norm
         self.ref_num_epochs = ref_num_epochs
-        self.ref_model = MnistCNN()
+        self.dataset_spec = dataset_spec
+        self.ref_model = dataset_spec.model_fn()
         self.ref_optimizer = torch.optim.SGD(self.ref_model.parameters(), lr=0.01)
         self.loss_fn = nn.CrossEntropyLoss()
         self.saved_global_parameters = None

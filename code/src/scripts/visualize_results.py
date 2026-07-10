@@ -7,6 +7,8 @@ import glob
 import matplotlib.pyplot as plt
 import numpy as np
 
+from src.models import get_dataset_spec
+
 
 def load_results(folder: str) -> list[dict]:
     """
@@ -589,7 +591,8 @@ def visualize_confusion_matrices(folder: str) -> None:
     else:
         axes = np.array(axes).flatten()
 
-    digit_labels = [str(i) for i in range(10)]
+    num_classes  = get_dataset_spec(results[0]["config"].get("dataset", "mnist")).num_classes
+    digit_labels = [str(i) for i in range(num_classes)]
 
     for idx, (config_id, (label, _, matrix)) in enumerate(sorted(config_matrices.items())):
         ax  = axes[idx]
@@ -603,14 +606,14 @@ def visualize_confusion_matrices(folder: str) -> None:
         ax.set_title(f"Config {config_id}\n{label}", fontsize=7)
         ax.set_xlabel("Predicted", fontsize=8)
         ax.set_ylabel("True", fontsize=8)
-        ax.set_xticks(range(10))
-        ax.set_yticks(range(10))
+        ax.set_xticks(range(num_classes))
+        ax.set_yticks(range(num_classes))
         ax.set_xticklabels(digit_labels, fontsize=6)
         ax.set_yticklabels(digit_labels, fontsize=6)
 
         # annotate cells with percentage
-        for i in range(10):
-            for j in range(10):
+        for i in range(num_classes):
+            for j in range(num_classes):
                 ax.text(j, i, f"{mat_norm[i,j]:.0%}",
                         ha="center", va="center",
                         fontsize=4,
@@ -652,17 +655,18 @@ def visualize_f1_score(folder: str) -> None:
     else:
         axes = np.array(axes).flatten()
 
-    metrics     = ["precision", "recall", "f1"]
-    colors      = ["#4C72B0", "#55A868", "#C44E52"]
-    digit_labels = [str(i) for i in range(10)]
-    x           = np.arange(10)
-    width       = 0.25
+    metrics      = ["precision", "recall", "f1"]
+    colors       = ["#4C72B0", "#55A868", "#C44E52"]
+    num_classes  = get_dataset_spec(results[0]["config"].get("dataset", "mnist")).num_classes
+    digit_labels = [str(i) for i in range(num_classes)]
+    x            = np.arange(num_classes)
+    width        = 0.25
 
     for idx, (config_id, (label, scores, _)) in enumerate(sorted(config_scores.items())):
         ax = axes[idx]
 
         for m_idx, (metric, color) in enumerate(zip(metrics, colors)):
-            values = [scores[str(d)][metric] for d in range(10)]
+            values = [scores[str(d)][metric] for d in range(num_classes)]
             ax.bar(x + m_idx * width, values, width, label=metric, color=color, alpha=0.85)
 
         ax.set_title(f"Config {config_id}\n{label}", fontsize=7)
@@ -696,6 +700,7 @@ def visualize_f1_tables(folder: str) -> None:
     results = load_results(folder)
 
     config_data = group_by_config_id(results)
+    num_classes = get_dataset_spec(results[0]["config"].get("dataset", "mnist")).num_classes
 
     os.makedirs(os.path.join(folder, "f1_tables"), exist_ok=True)
 
@@ -705,7 +710,6 @@ def visualize_f1_tables(folder: str) -> None:
         ax.set_title(f"Config {config_id} - {label} (n={test_size:,})", fontsize=10, pad=10)
         ax.axis("off")
 
-        num_classes  = 10
         col_labels   = ["Class", "TP", "FP", "FN", "TN", "Precision", "Recall", "F1"]
         table_data   = []
 
@@ -859,7 +863,8 @@ def visualize_label_distribution(folder: str) -> None:
 
     os.makedirs(os.path.join(folder, "label_distribution"), exist_ok=True)
 
-    digit_labels = [str(i) for i in range(10)]
+    num_classes  = get_dataset_spec(results[0]["config"].get("dataset", "mnist")).num_classes
+    digit_labels = [str(i) for i in range(num_classes)]
     colors = plt.cm.tab10.colors
 
     bar_names = ["Root"] + [f"C{cid}" for cid in sorted(label_distribution["clients"], key=int)]

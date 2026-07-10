@@ -6,9 +6,9 @@ import torch.nn as nn
 import flwr as fl
 import warnings
 
-from src.constants import ACCURACY_KEY, NUM_CLASSES_MNIST
+from src.constants import ACCURACY_KEY
 from src.mechanisms.topk import topk_sparsify
-from src.models.mnist_cnn import MnistCNN
+from src.models import get_dataset_spec
 from src.mechanisms.dp import compute_noise_multiplier, make_private, get_privacy_spent, make_private_with_noise_multiplier, restore_accountant_state, serialize_accountant_state
 
 warnings.filterwarnings("ignore", message="Secure RNG turned off")
@@ -37,7 +37,8 @@ class MnistClient(fl.client.NumPyClient):
 
     def __init__(self, client_id, train_loader, test_loader,
                  use_dp=False, epsilon=10.0, delta=1e-5,
-                 use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None):
+                 use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None,
+                 dataset_spec=get_dataset_spec("mnist")):
         self.client_id = client_id
         self.seed = seed
         if seed is not None:
@@ -45,7 +46,8 @@ class MnistClient(fl.client.NumPyClient):
             set_seed(seed + client_id)
         self.train_loader = train_loader
         self.test_loader = test_loader
-        self.model = MnistCNN()
+        self.dataset_spec = dataset_spec
+        self.model = dataset_spec.model_fn()
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=0.01)
         self.loss_fn = nn.CrossEntropyLoss()
         self.use_dp = use_dp
@@ -149,7 +151,7 @@ class MnistClient(fl.client.NumPyClient):
 
         # Recreate privacy engine
         if self.use_dp and self.noise_multiplier is not None:
-            model_tmp = MnistCNN()
+            model_tmp = self.dataset_spec.model_fn()
             model_tmp.load_state_dict(self.model.state_dict())
             opt_tmp = torch.optim.SGD(model_tmp.parameters(), lr=0.01)
             model_tmp, opt_tmp, train_loader, self.privacy_engine = make_private_with_noise_multiplier(
@@ -241,8 +243,8 @@ class MnistClient(fl.client.NumPyClient):
         total = 0
         total_loss = 0.0
 
-        # confusion matrix: 10x10 for MNIST
-        num_classes = NUM_CLASSES_MNIST
+        # confusion matrix: num_classes x num_classes
+        num_classes = self.dataset_spec.num_classes
         confusion_matrix = [[0] * num_classes for _ in range(num_classes)]
 
         # Evaluation

@@ -2,8 +2,6 @@
 - Implement CIFAR-10
 - BLADES validation
 
-- Attack: Byzantine clients random contributions -> See what happens if attacking clients just send random gradients
-- Attack: Byzantine clients send huge random updates (real gradients scaled)
 <!-- - Revisit trust scores -!- -->
 -> Print gradients to check (mit info ob honest oder nicht)
 
@@ -15,9 +13,7 @@ Visualisation:
 
 
 ### What to do next
-1. Add a new attack method. The principle is this: The malicious client should just send arbitrary gradients without computing on the dataset at all
-2. Add another new attack method. The principle is this: Compute a real gradient (based on another attack model that can be specified (currently there will be label flipping or the new arbitrary gradients attack)) and scale it to a much larger size.
-These attacks should be build like the existing label flipping attack where appropriate. If possible extract redundant code into helper functions. If possible make the second, scaling attack, so that it can extend upon another attack method.
+1. Implement CIFAR-10
 
 
 ### How to get to computation ressources

@@ -1,6 +1,22 @@
 # CIFAR-10 Implementation Plan
 
-Drafted 2026-07-09. Not yet implemented — this is a saved plan for a future session.
+Drafted 2026-07-09. Revised 2026-07-10 (re-checked against the codebase after the
+Byzantine-attack refactor, before implementation starts). Implemented 2026-07-10.
+
+**Design change made during implementation:** this plan originally called for two
+separate pieces -- a `MODEL_REGISTRY`/`get_model_fn()` pair in `models/__init__.py`,
+and a `NUM_CLASSES_MNIST` -> `NUM_CLASSES` rename in `constants.py`. While
+implementing, we noticed these two facts (which model to build, how many output
+classes it has) are always resolved together at every call site, so they were
+consolidated into a single `DatasetSpec` dataclass (`model_fn` + `num_classes`) and
+one `DATASET_REGISTRY`/`get_dataset_spec(dataset)` pair, both living in
+`models/__init__.py`. `constants.py` keeps only the two bare numbers
+(`NUM_CLASSES_MNIST`, `NUM_CLASSES_CIFAR10`), no registry of its own. Every class
+that the sections below describe as taking a `model_fn` parameter instead takes a
+single `dataset_spec` parameter (a `DatasetSpec` instance) and reads `.model_fn()`/
+`.num_classes` off it -- the sections below are left as originally written for
+historical record, but treat every `model_fn=...` parameter mention as
+`dataset_spec=...` in the actual implementation.
 
 ## Context
 
@@ -35,7 +51,27 @@ and `FLTrustStrategy`. This avoids duplicating ~250 lines of identical fit/evalu
 aggregate logic into new `Cifar10Client`/`Cifar10LabelFlipClient` classes, which would
 contradict the repo's own `TODO.md` ("Refactor redundancy") and double the maintenance
 surface for every future fix. Class names (`MnistClient`, `LabelFlipClient`) stay as-is
-— renaming them is purely cosmetic and out of scope for this pass.
+-- renaming them is purely cosmetic and out of scope for this pass.
+
+**Updated 2026-07-10, re-checked against the codebase before implementation starts:**
+since this plan was drafted, a Byzantine-attack refactor added `RandomGradientClient`,
+`ScaledUpdateMixin`, `ScaledLabelFlipClient`, `ScaledRandomGradientClient`, and a
+`build_malicious_client()` dispatch factory (all in `mechanisms/attacks.py`), plus
+`compute_label_distribution()` (`server.py`). Re-checked every one against this plan's
+"parameterize, don't duplicate" thesis:
+- `RandomGradientClient` never constructs a model directly (its DP path delegates to
+  `super().fit()`, i.e. the already-parameterized `MnistClient.fit()`; its no-DP path
+  only touches the flat `parameters` array) -- needs `model_fn` added to `__init__`
+  only, to forward to `super().__init__()`.
+- `ScaledUpdateMixin` never constructs a model and already forwards `*args, **kwargs`
+  generically to `super().__init__()` -- needs zero changes.
+- `ScaledLabelFlipClient`/`ScaledRandomGradientClient` are one-line pass-through
+  classes -- nothing to change.
+- `compute_label_distribution()` already uses the same `hasattr(targets, "tolist")`
+  pattern as `load_datasets()` -- already fully dataset-agnostic, no changes needed.
+- `build_malicious_client()` is the one new site that actually needs a `model_fn`
+  param (forwarded into the kwargs dict before constructing whichever `ATTACK_CLASSES`
+  entry gets picked) -- see section 2 below, which now reflects this.
 
 ## 1. New file: `code/src/models/cifar10_cnn.py`
 
@@ -80,33 +116,52 @@ check against the ~270K params ResNet20 typically has).
   `evaluate()`: `num_classes = NUM_CLASSES_MNIST` -> `num_classes = NUM_CLASSES` (renamed
   constant, see section 4).
 
-- **`code/src/mechanisms/attacks.py`** (`LabelFlipClient`): add `model_fn` param, pass
-  through `super().__init__(...)`. `fit()`: `model_tmp = MnistCNN()` ->
-  `model_tmp = self.model_fn()`. `source_label`/`target_label` defaults stay unchanged —
-  the swap mechanism is dataset-agnostic (any two distinct class indices 0-9 work
-  equivalently as a Byzantine attack); only the docstring wording ("the digit to
-  relabel") should generalize to "the class index to relabel".
+- **`code/src/mechanisms/attacks.py`** (updated for the classes added since this plan
+  was drafted):
+  - `LabelFlipClient`: add `model_fn` param, pass through `super().__init__(...)`.
+    `fit()`: `model_tmp = MnistCNN()` -> `model_tmp = self.model_fn()`.
+    `source_label`/`target_label` defaults stay unchanged -- the swap mechanism is
+    dataset-agnostic (any two distinct class indices 0-9 work equivalently as a
+    Byzantine attack); only the docstring wording ("the digit to relabel") should
+    generalize to "the class index to relabel".
+  - `RandomGradientClient`: add `model_fn` param to `__init__`, forward to
+    `super().__init__(...)`. No other changes -- `fit()` never constructs a model
+    directly (see the updated "Guiding decision" section above).
+  - `ScaledUpdateMixin`, `ScaledLabelFlipClient`, `ScaledRandomGradientClient`: no
+    changes needed (already generic / pass-through).
+  - `build_malicious_client()`: add `model_fn=MnistCNN` param, include it in the
+    `kwargs` dict passed to whichever `ATTACK_CLASSES` entry gets constructed -- this
+    is the one new site this plan didn't originally account for.
 
 - **`code/src/mechanisms/robust_aggregation.py`** (`FLTrustStrategy`): add
-  `model_fn=MnistCNN` param, replace `self.ref_model = MnistCNN()` with
-  `self.ref_model = model_fn()`. `aggregate_fit()` needs no changes (already fully
-  generic). The standalone `if __name__ == "__main__":` demo block at the bottom stays
-  MNIST-only (it's a unit test of the aggregation math, not in scope here).
+  `model_fn=MnistCNN` param (alongside the existing `ref_num_epochs=3` param, added
+  since this plan was drafted -- no conflict, just note both coexist), replace
+  `self.ref_model = MnistCNN()` with `self.ref_model = model_fn()`. `aggregate_fit()`
+  needs no changes (already fully generic). The standalone `if __name__ == "__main__":`
+  demo block at the bottom stays MNIST-only (it's a unit test of the aggregation math,
+  not in scope here).
 
 - **`code/src/server.py`** (most of the change surface):
   - `load_datasets(root_dataset_size, seed=None, dataset="mnist")`: branch on `dataset`
     to pick `datasets.MNIST`/`datasets.CIFAR10` and the matching transform (see section
-    3). Stratified split logic below is untouched.
+    3). Stratified split logic below is untouched. `compute_label_distribution()`
+    needs no changes (already dataset-agnostic, see updated "Guiding decision" above).
   - `make_evaluate_fn(test_dataset, model_fn=MnistCNN)`: pass `model_fn` to the
     throwaway `eval_client`.
-  - `get_client_fn(...)`: add `model_fn=MnistCNN` param, pass to both
-    `LabelFlipClient(...)` and `MnistClient(...)`.
+  - `get_client_fn(...)`: add `model_fn=MnistCNN` param (alongside `attack_type`/
+    `attack_scale`/`source_label`/`target_label`, added since this plan was drafted).
+    The malicious branch now calls `build_malicious_client(...)` (not `LabelFlipClient(...)`
+    directly, as this plan originally assumed) -- pass `model_fn` there; pass it to
+    `MnistClient(...)` for the honest branch as originally planned.
   - `get_server_fn(...)`: thread `model_fn` through to `make_evaluate_fn` and
     `FLTrustStrategy`.
   - `run_simulation_with_config(config)`: resolve `model_fn = get_model_fn(config.dataset)`
     once at the top; pass `dataset=config.dataset` to `load_datasets`; pass `model_fn`
-    to `make_evaluate_fn`, `FLTrustStrategy`, and `get_client_fn`; replace the seeded
-    initial-parameters block's `MnistCNN().state_dict()` with `model_fn().state_dict()`.
+    to `make_evaluate_fn` (`evaluate_fn = make_evaluate_fn(...)`), the `TrackingFLTrust(...)`
+    construction, and `get_client_fn`; replace the seeded initial-parameters block's
+    `MnistCNN().state_dict()` with `model_fn().state_dict()`. (`compute_label_distribution(...)`,
+    added since this plan was drafted, now sits between `load_datasets()` and these
+    calls -- unaffected, needs no `model_fn`.)
 
 ## 3. `ExperimentConfig` — new `dataset` field
 
@@ -134,6 +189,12 @@ cross-dataset comparison.
   `inflate_confusion_matrix_mnist_and_calculate_scores` ->
   `inflate_confusion_matrix_and_calculate_scores` (drop `_mnist`); update its docstring
   ("digit class" -> "class") and call site.
+- `code/src/scripts/visualize_results.py`: several plotting functions hardcode
+  `range(10)`/`np.arange(10)` directly (including `visualize_label_distribution()`,
+  added since this plan was drafted) rather than deriving from `NUM_CLASSES`.
+  Functionally harmless for CIFAR-10 (also 10 classes), but worth switching to
+  `NUM_CLASSES` for consistency with the rest of this rename, now that there are more
+  hardcoded-`10` sites than when this plan was written.
 
 ## 5. Results file collision avoidance
 
@@ -176,11 +237,14 @@ cross-dataset comparison.
 - Byzantine label-flip indices (`source_label=3, target_label=7`) reused unchanged for
   CIFAR-10 — dataset-agnostic mechanism, any two distinct indices are equivalent.
 - CIFAR-10 (50K train images) is close enough to MNIST (60K) that existing
-  `SHARED_PARAMS` defaults (`num_clients=15`, `root_dataset_size=600`) should transfer
-  without changes to the plumbing — but expect CIFAR-10 to need meaningfully more
-  rounds than MNIST's `num_rounds=10` to reach comparable accuracy with a from-scratch
-  ResNet20; low baseline accuracy on first CIFAR-10 runs should not be mistaken for a
-  bug.
+  `SHARED_PARAMS` defaults should transfer without changes to the plumbing -- note
+  these defaults have themselves changed since this plan was drafted (currently
+  `num_clients=50`, `root_dataset_size=1000`, `num_byzantine=20`,
+  `attack_type="random_gradient"`, `attack_scale=2.0`, not the `num_clients=15`,
+  `root_dataset_size=600` this plan originally cited). Expect CIFAR-10 to need
+  meaningfully more rounds than MNIST's `num_rounds` to reach comparable accuracy with
+  a from-scratch ResNet20; low baseline accuracy on first CIFAR-10 runs should not be
+  mistaken for a bug.
 
 ## Note on this planning session
 

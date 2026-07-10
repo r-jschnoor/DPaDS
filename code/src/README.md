@@ -401,3 +401,24 @@ against a pre-existing 24-file result folder with no crash.
 
 The whole design derives array shapes from the `parameters` argument `fit()` already receives
 (never a hardcoded `MnistCNN()`), so it needs no changes when CIFAR-10 support lands.
+
+## Limitation: epsilon=0.1 is infeasible at the current round count
+
+`run_configurations.py`'s `EPSILON_VALUES` includes `0.1`. With this run's parameters (50
+clients, `root_dataset_size=1000` -> ~1180 samples/client -> 37 batches/round -> sample_rate
+≈ 1/37, 50 rounds), `compute_noise_multiplier()` (`mechanisms/dp.py`) cannot find a noise
+multiplier that achieves that tight a budget over 50 rounds of composition -- Opacus's
+`get_noise_multiplier()` raises `ValueError: The privacy budget is too low.` before any training
+happens, in `MnistClient.__init__` (`client.py:63`). This crashes any config with `use_dp=True`
+in the sweep, regardless of `attack_type` -- confirmed the crash is unrelated to the
+`random_gradient`/`label_flip` attack work, since it happens during honest-client construction,
+before any attack-specific code runs.
+
+Reproduced directly against Opacus with this run's real sample_rate/round count:
+`epsilon=0.1` fails (`"The privacy budget is too low."`), while `epsilon=1.0` (noise_multiplier
+4.80), `epsilon=5.0` (1.34), and `epsilon=10.0` (0.91) all succeed. Not a code bug -- `0.1` is
+genuinely infeasible at this sample_rate/round count; the fix is either dropping `0.1` from
+`EPSILON_VALUES`, reducing `num_rounds` (fewer composition steps), or lowering the sample_rate
+(larger per-client dataset share, e.g. fewer clients or a larger `root_dataset_size` trade-off,
+per the earlier root-dataset-size discussion) -- not something fixable in `compute_noise_multiplier()`
+itself.
