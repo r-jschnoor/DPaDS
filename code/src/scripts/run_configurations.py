@@ -18,8 +18,12 @@ from src.server import run_simulation_with_config
 # regardless of the cwd the script happens to be invoked from.
 RESULTS_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "results"))
 
+DEFAULT_DATASET = "cifar10"   # "mnist" or "cifar10" -> same dataset for every config in a run, edit here to switch it.
+DEFAULT_MAX_CPUS = 25
+
 # Shared parameters across all experiments
 SHARED_PARAMS = dict(
+    dataset = DEFAULT_DATASET,
     num_clients = 10,
     num_rounds = 5,
     num_byzantine = 2,
@@ -31,13 +35,11 @@ SHARED_PARAMS = dict(
     attack_type = "label_flip",   # "label_flip" or "random_gradient" -> same
                                    # attack for every config in a run, edit
                                    # here to switch it.
-    attack_scale = 2.0,          # None/1.0 for unscaled, else the scale
+    attack_scale = 3.0,          # None/1.0 for unscaled, else the scale
                                    # factor for the wrapped attack variant.
     source_label = 3,             # Only used when attack_type="label_flip".
     target_label = 7,
 )
-
-DEFAULT_MAX_CPUS = 25
 
 
 BASE_CONFIGS = {
@@ -84,8 +86,8 @@ BASE_CONFIGS = {
 }
 
 # Variants to explore
-EPSILON_VALUES = [1.0, 5.0, 10.0, 25.0]
-TOPK_VALUES = [0.01, 0.1, 0.5]
+EPSILON_VALUES = [1.0, 5.0, 10.0]
+TOPK_VALUES = [0.1, 0.5]
 
 
 def expand_config(base: ExperimentConfig) -> list[ExperimentConfig]:
