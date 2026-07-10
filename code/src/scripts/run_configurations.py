@@ -24,11 +24,11 @@ SHARED_PARAMS = dict(
     num_rounds = 50,
     num_byzantine = 20,
     root_dataset_size = 1000,
-    rescale_to_ref_norm = False,
+    rescale_to_ref_norm = True,
     seed = 42,  # Same data split + initial model across a config sweep, so
                 # only the parameter actually variy (epsilon, topk_ratio,
                 # etc.) explains any accuracy difference between variants.
-    attack_type = "random_gradient",   # "label_flip" or "random_gradient" -> same
+    attack_type = "label_flip",   # "label_flip" or "random_gradient" -> same
                                    # attack for every config in a run, edit
                                    # here to switch it.
     attack_scale = 2.0,          # None/1.0 for unscaled, else the scale
@@ -82,7 +82,7 @@ BASE_CONFIGS = {
 }
 
 # Variants to explore
-EPSILON_VALUES = [1.0, 5.0, 10.0, 0.1]
+EPSILON_VALUES = [1.0, 5.0, 10.0, 25.0]
 TOPK_VALUES = [0.01, 0.1, 0.5]
 
 

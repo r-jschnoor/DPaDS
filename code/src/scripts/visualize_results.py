@@ -238,7 +238,7 @@ def visualize_bar_chart_per_config(folder: str) -> None:
             # Take only final rounds accuracy
             final_accuracy = result["results"]["per_round"][-1].get("accuracy")
             if final_accuracy is None:
-                print(f"Could not find accuracy of final round for one of configs {config_id} results. ({result["_filename"]})")
+                print(f"Could not find accuracy of final round for one of configs {config_id} results. ({result['_filename']})")
                 continue
             label = make_label(result["_filename"])
             bars.append((label, final_accuracy))
