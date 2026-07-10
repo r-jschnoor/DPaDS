@@ -28,9 +28,9 @@ DEFAULT_GPU_INDEX = 0         # None -> auto-pick the GPU with most free VRAM.
 # Shared parameters across all experiments
 SHARED_PARAMS = dict(
     dataset = DEFAULT_DATASET,
-    num_clients = 10,
-    num_rounds = 5,
-    num_byzantine = 2,
+    num_clients = 30,
+    num_rounds = 100,
+    num_byzantine = 10,
     root_dataset_size = 1000,
     rescale_to_ref_norm = False,
     seed = 42,  # Same data split + initial model across a config sweep, so
@@ -39,10 +39,10 @@ SHARED_PARAMS = dict(
     attack_type = "label_flip",   # "label_flip" or "random_gradient" -> same
                                    # attack for every config in a run, edit
                                    # here to switch it.
-    attack_scale = 3.0,          # None/1.0 for unscaled, else the scale
+    attack_scale = 2.0,          # None/1.0 for unscaled, else the scale
                                    # factor for the wrapped attack variant.
     source_label = 3,             # Only used when attack_type="label_flip".
-    target_label = 7,
+    target_label = 5,
 )
 
 
