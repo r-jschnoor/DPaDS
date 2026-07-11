@@ -251,7 +251,8 @@ def visualize_bar_chart_per_config(folder: str) -> None:
 
     # Plot
     fig, ax = plt.subplots(figsize=(16, 6))
-    ax.set_title("Final Round Accuracy per Config Variant", fontsize=13)
+    dataset = results[0]['config']['dataset'] if results[0] and results[0]['config'] and results[0]['config']['dataset'] else 'Undefined'
+    ax.set_title(f"Final Round Accuracy per Config Variant ({dataset})", fontsize=13)
     ax.set_ylabel("Accuracy")
     ax.set_ylim(0, 1.05)
     ax.grid(axis="y", alpha=0.3)
@@ -263,7 +264,7 @@ def visualize_bar_chart_per_config(folder: str) -> None:
     gap       = 1.2        # gap between config groups
 
     colors = plt.cm.tab10.colors
-    hatches = ['--', '++', 'xx', '//', '\\\\', '||', '*', 'o', '.']
+    hatches = ['--', '++', 'xx', '//', '\\\\', '||', '*', 'o', '.', 'x']
 
     for config_id, bars in group_bars:
         group_start = x
@@ -315,7 +316,7 @@ def visualize_bar_chart_per_config(folder: str) -> None:
     plt.subplots_adjust(bottom=0.3)
 
     # Run params, positioned just below the legend's actual rendered bottom
-    # edge -- computed after layout so it hugs a short legend (few variants)
+    # edge. Computed after layout so it hugs a short legend (few variants)
     # and still clears a tall, many-row one (many variants), rather than a
     # fixed offset tuned for one particular legend size. Legend.get_window_extent()
     # needs a draw() first so the renderer has real (not stale) coordinates,
