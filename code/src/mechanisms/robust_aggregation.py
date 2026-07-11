@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from flwr.server.strategy import FedAvg
 from flwr.common import parameters_to_ndarrays, ndarrays_to_parameters
 
+from src.client import iterate_batches
 from src.models import get_dataset_spec
 from src.models.mnist_cnn import MnistCNN
 
@@ -32,27 +33,27 @@ def cosine_similarity(a, b):
     return np.dot(a, b) / (norm_a * norm_b)
 
 
-def get_reference_update(model, root_loader, optimizer, loss_fn, num_epochs=3):
+def get_reference_update(model, root_loader, optimizer, loss_fn, num_steps):
     """
-    Train the server model on root dataset for a few epochs.
+    Train the server model on the root dataset for num_steps SGD steps.
 
-    Produces a reference gradient direction that honest client
-    updates should roughly align with. Because root_loader holds far
-    fewer samples than a client's local dataset, one epoch here is far
-    fewer SGD steps than a client's local epoch, so the reference update's
-    norm is systematically smaller than a client update's norm (Roughly 6 times
-    for our tests).
-    Averaging over multiple epochs reduces the variance of
-    the resulting direction, which matters since it's compared to client
-    updates via cosine similarity every round.
+    Produces a reference gradient direction that honest client updates
+    should roughly align with. Callers translate whatever epoch/iteration
+    scheme they use into a single num_steps count; this function always
+    just takes that many steps via iterate_batches (cycling the loader,
+    with a fresh shuffle each cycle, if num_steps exceeds one epoch's
+    worth of batches). Because root_loader typically holds far fewer
+    samples than a client's local dataset, a step count matched to one
+    client epoch is far fewer SGD steps than a client's local epoch, so
+    the reference update's norm is systematically smaller than a client
+    update's norm (roughly 6 times for our tests).
 
     Args:
         model (nn.Module):          server-side reference model.
         root_loader (DataLoader):   small clean server-held dataset.
         optimizer (torch.optim):    optimizer for the reference model.
         loss_fn (nn.Module):        loss function.
-        num_epochs (int):           number of epochs to train the reference
-                                    model for. Defaults to 3.
+        num_steps (int):            number of SGD steps to train the reference model for.
 
     Returns:
         np.ndarray: flat vector of parameter updates (before - after training).
@@ -63,17 +64,15 @@ def get_reference_update(model, root_loader, optimizer, loss_fn, num_epochs=3):
         for p in model.parameters()
     ])
 
-    # A few epochs of training on root data
     device = next(model.parameters()).device
     model.train()
-    for _ in range(num_epochs):
-        for images, labels in root_loader:
-            images, labels = images.to(device), labels.to(device)
-            optimizer.zero_grad()
-            outputs = model(images)
-            loss = loss_fn(outputs, labels)
-            loss.backward()
-            optimizer.step()
+    for images, labels in iterate_batches(root_loader, num_steps):
+        images, labels = images.to(device), labels.to(device)
+        optimizer.zero_grad()
+        outputs = model(images)
+        loss = loss_fn(outputs, labels)
+        loss.backward()
+        optimizer.step()
 
     # Record weights after training
     after = np.concatenate([
@@ -102,7 +101,14 @@ class FLTrustStrategy(FedAvg):
     Args:
         root_loader (DataLoader):   small clean server-held dataset.
         ref_num_epochs (int):       epochs to train the reference model for
-                                    each round. Defaults to 3.
+                                    each round. Defaults to 3. Ignored when
+                                    num_client_iterations_per_round is set.
+        num_client_iterations_per_round (int | None): if set, the reference model
+                                    takes exactly this many SGD steps each round instead
+                                    of ref_num_epochs epochs -- matching the FLTrust
+                                    paper's shared Rl between client and server, rather
+                                    than two independently-tuned epoch counts. None
+                                    (default) keeps the ref_num_epochs behavior.
         dataset_spec (DatasetSpec): model factory + class count for this run's
                                     dataset. Defaults to MNIST.
         device (torch.device):      which device to train the reference model on.
@@ -112,11 +118,13 @@ class FLTrustStrategy(FedAvg):
     """
 
     def  __init__(self, root_loader, rescale_to_ref_norm=False, ref_num_epochs=3,
+                 num_client_iterations_per_round=None,
                  dataset_spec=get_dataset_spec("mnist"), device=torch.device("cpu"), **kwargs):
         super().__init__(**kwargs)
         self.root_loader = root_loader
         self.rescale_to_ref_norm=rescale_to_ref_norm
         self.ref_num_epochs = ref_num_epochs
+        self.num_client_iterations_per_round = num_client_iterations_per_round
         self.dataset_spec = dataset_spec
         self.device = device
         self.ref_model = dataset_spec.model_fn().to(device)
@@ -153,11 +161,13 @@ class FLTrustStrategy(FedAvg):
         # Reset optimizer as per paper
         self.ref_optimizer = torch.optim.SGD(self.ref_model.parameters(), lr=0.01)
 
-        # Get reference update from servers root dataset
+        # Get reference update from servers root dataset. num_client_iterations_per_round overrides ref_num_epochs with an explicit step count shared with the
+        # clients, when set. Otherwise reproduce the old epoch-based behavior as an equivalent step count.
+        num_steps = self.num_client_iterations_per_round or self.ref_num_epochs * len(self.root_loader)
         reference_update = get_reference_update(
             self.ref_model, self.root_loader,
             self.ref_optimizer, self.loss_fn,
-            num_epochs=self.ref_num_epochs,
+            num_steps=num_steps,
         )
 
 
@@ -184,17 +194,12 @@ class FLTrustStrategy(FedAvg):
 
         print(f"\n[FLTrust Round {server_round}] Trust scores: {[f'{s:.3f}' for s in trust_scores]}")
 
-        # Build {node_id: trust} dict per round so trust can be tracked per-client over the run once
-        # saved to the results file.
+        # Build {client_id: trust} dict per round so trust can be tracked per-client over the run once
+        # saved to the results file. malicious_<client_id> is added uniformly for every
+        # strategy by HistoryStrategyAdapter.aggregate_fit() (server.py).
         trust_metrics = {
-            f"trust_score_{client_proxy.node_id}": float(score)
-            for (client_proxy, _), score in zip(results, trust_scores)
-        }
-
-        # Keep malicious information per client instead of squashing it into a fraction
-        malicious_metrics = {
-            f"malicious_{client_proxy.node_id}": float(fit_result.metrics.get("is_malicious", 0.0))
-            for client_proxy, fit_result in results
+            f"trust_score_{int(fit_result.metrics['client_id'])}": float(score)
+            for (_, fit_result), score in zip(results, trust_scores)
         }
 
         # If all trust scores are zero (hence we expect all clients to be
@@ -206,7 +211,7 @@ class FLTrustStrategy(FedAvg):
             # It was already trained one epoch on the root dataset inside
             # get_reference_update() above, so its weights no longer match the
             # global model that was actually sent out this round.
-            return ndarrays_to_parameters(server_state_parameters), {**trust_metrics, **malicious_metrics}
+            return ndarrays_to_parameters(server_state_parameters), trust_metrics
 
         # Scale each update to reference norm and then apply a
         # weighted average
@@ -258,7 +263,6 @@ class FLTrustStrategy(FedAvg):
         if fit_metrics and self.fit_metrics_aggregation_fn:
             aggregated_metrics = self.fit_metrics_aggregation_fn(fit_metrics)
         aggregated_metrics.update(trust_metrics)
-        aggregated_metrics.update(malicious_metrics)
 
         return ndarrays_to_parameters(new_parameters), aggregated_metrics
 
@@ -283,7 +287,7 @@ if __name__ == "__main__":
     opti = torch.optim.SGD(model.parameters(), lr=0.01)
     loss_fn = nn.CrossEntropyLoss()
 
-    ref = get_reference_update(model, loader, opti, loss_fn)
+    ref = get_reference_update(model, loader, opti, loss_fn, num_steps=6)  # 3 epochs' worth at 2 batches/epoch
     print(f"\nReference update shape: {ref.shape}")
     print(f"Reference update norm: {np.linalg.norm(ref):.4f}") # How far did server model move
     print(f"Reference update is non-zero: {np.any(ref != 0)}")
@@ -297,7 +301,7 @@ if __name__ == "__main__":
     shapes = [p.shape for p in ref_parameters]
     total_size = sum(int(np.prod(s)) for s in shapes)
 
-    def make_fit_result(update_flat):
+    def make_fit_result(client_id, update_flat):
         """
         Helper to reconstruc parameter list from flat vector
         """
@@ -311,9 +315,9 @@ if __name__ == "__main__":
             status=Status(code=Code.OK, message=""),
             parameters=ndarrays_to_parameters(params),
             num_examples=100,
-            metrics={},
+            metrics={"client_id": client_id},
         )
-    
+
     # honest clients (small change in direction)
     honest_update1 = ref * 0.9
     noise = np.random.randn(*ref.shape) * 0.01
@@ -323,9 +327,9 @@ if __name__ == "__main__":
     malicious_update = ref * -5.0       # Oposite direction + large magnitude
 
     fake_results = [
-        (None, make_fit_result(honest_update1)),
-        (None, make_fit_result(honest_update2)),
-        (None, make_fit_result(malicious_update)),
+        (None, make_fit_result(0, honest_update1)),
+        (None, make_fit_result(1, honest_update2)),
+        (None, make_fit_result(2, malicious_update)),
     ]
 
     strategy = FLTrustStrategy(
@@ -333,6 +337,10 @@ if __name__ == "__main__":
         fraction_fit=1.0,
         min_available_clients=3,
     )
+    # aggregate_fit() alone (not configure_fit()) needs saved_global_parameters;
+    # set it directly instead of calling configure_fit(), which would need a
+    # real Flower ClientManager just to sample clients we don't use here.
+    strategy.saved_global_parameters = ref_parameters
 
     aggregation_parameters, _ = strategy.aggregate_fit(
         server_round=1,

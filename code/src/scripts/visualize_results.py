@@ -902,6 +902,204 @@ def visualize_label_distribution(folder: str) -> None:
     plt.close()
 
 
+# Fixed colors for the honest/malicious split, reused across every trust
+# plot below -- never cycled or reassigned per config/client like the tab10
+# colors elsewhere in this file, since honest vs. malicious is a fixed,
+# always-two-valued category.
+HONEST_COLOR = "#1f77b4"
+MALICIOUS_COLOR = "#d62728"
+
+
+def _avg_trust_per_client(result: dict) -> dict:
+    """
+    Average one result's per-round trust scores into {client_id: avg_trust}.
+
+    Args:
+        result (dict): loaded result JSON (must have use_fltrust=True).
+
+    Returns:
+        dict: {client_id (str): average trust score over the whole run}.
+    """
+    sums, counts = {}, {}
+    for entry in result["results"]["per_round"]:
+        for client_id, score in entry["trust_scores"].items():
+            sums[client_id] = sums.get(client_id, 0.0) + score
+            counts[client_id] = counts.get(client_id, 0) + 1
+    return {client_id: sums[client_id] / counts[client_id] for client_id in sums}
+
+
+def visualize_trust_per_client(folder: str) -> None:
+    """
+    Average trust per client over the whole run, grouped by FLTrust config variant.
+
+    One point per client per variant, colored by whether that client was
+    honest or malicious, with a small horizontal spread (not random jitter,
+    so the plot is reproducible) so points inside a group don't overlap.
+    Non-FLTrust variants never produce trust scores, so they're excluded.
+
+    Args:
+        folder (str): path to folder containing result JSON files.
+    """
+    results = [r for r in load_results(folder) if r["config"]["use_fltrust"]]
+    if not results:
+        print("No FLTrust-enabled result files found -- skipping per-client trust plot.")
+        return
+    results.sort(key=lambda r: (r["config"]["config_id"], r["_filename"]))
+
+    fig, ax = plt.subplots(figsize=(max(10, len(results) * 1.3), 6))
+    ax.set_title("Average Trust per Client over the Run (FLTrust configs only)", fontsize=13)
+    ax.set_ylabel("Avg trust score")
+    ax.set_ylim(0, 1.05)
+    ax.grid(axis="y", alpha=0.3)
+
+    tick_pos, tick_lab = [], []
+    for x, result in enumerate(results):
+        malicious = result["results"]["malicious_clients"]
+        avg_trust = _avg_trust_per_client(result)
+        client_ids = sorted(avg_trust, key=lambda c: (malicious.get(c, False), int(c)))
+
+        for i, client_id in enumerate(client_ids):
+            spread = (i / max(len(client_ids) - 1, 1) - 0.5) * 0.5   # spread across [-0.25, 0.25]
+            color = MALICIOUS_COLOR if malicious.get(client_id, False) else HONEST_COLOR
+            ax.scatter(x + spread, avg_trust[client_id], color=color,
+                       edgecolor="white", linewidth=0.5, s=35, alpha=0.85, zorder=3)
+
+        honest_vals = [avg_trust[c] for c in client_ids if not malicious.get(c, False)]
+        malicious_vals = [avg_trust[c] for c in client_ids if malicious.get(c, False)]
+        if honest_vals:
+            ax.hlines(np.mean(honest_vals), x - 0.3, x + 0.3, color=HONEST_COLOR, linewidth=2, zorder=4)
+        if malicious_vals:
+            ax.hlines(np.mean(malicious_vals), x - 0.3, x + 0.3, color=MALICIOUS_COLOR, linewidth=2, zorder=4)
+
+        tick_pos.append(x)
+        tick_lab.append(make_label(result["_filename"]))
+
+    ax.set_xticks(tick_pos)
+    ax.set_xticklabels(tick_lab, fontsize=7, rotation=45, ha="right")
+
+    legend_handles = [
+        plt.Line2D([0], [0], marker="o", color="none", markerfacecolor=HONEST_COLOR, markersize=7, label="Honest client"),
+        plt.Line2D([0], [0], marker="o", color="none", markerfacecolor=MALICIOUS_COLOR, markersize=7, label="Malicious client"),
+        plt.Line2D([0], [0], color="black", linewidth=2, label="Group mean"),
+    ]
+    ax.legend(handles=legend_handles, fontsize=8, loc="upper center",
+              bbox_to_anchor=(0.5, -0.3), ncol=3, framealpha=0.8)
+
+    plt.tight_layout()
+    output_path = os.path.join(folder, "trust_per_client.png")
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    print(f"Saved to: {output_path}")
+    plt.close()
+
+
+def _honest_vs_malicious_by_round(results: list[dict]) -> tuple[list[int], list, list]:
+    """
+    Pool per-round trust scores across results into honest/malicious round averages.
+
+    Args:
+        results (list[dict]): loaded result JSONs (all use_fltrust=True).
+
+    Returns:
+        tuple: (rounds, honest_avg, malicious_avg) -- parallel lists, one
+              entry per round; averages are None for a round with no scores
+              of that kind.
+    """
+    honest_by_round = defaultdict(list)
+    malicious_by_round = defaultdict(list)
+    for result in results:
+        malicious = result["results"]["malicious_clients"]
+        for entry in result["results"]["per_round"]:
+            for client_id, score in entry["trust_scores"].items():
+                bucket = malicious_by_round if malicious.get(client_id, False) else honest_by_round
+                bucket[entry["round"]].append(score)
+
+    rounds = sorted(set(honest_by_round) | set(malicious_by_round))
+    honest_avg = [np.mean(honest_by_round[r]) if honest_by_round[r] else None for r in rounds]
+    malicious_avg = [np.mean(malicious_by_round[r]) if malicious_by_round[r] else None for r in rounds]
+    return rounds, honest_avg, malicious_avg
+
+
+def visualize_trust_over_rounds(folder: str) -> None:
+    """
+    Honest vs. malicious average trust score per round, pooled across every
+    FLTrust-enabled config variant in the folder.
+
+    Args:
+        folder (str): path to folder containing result JSON files.
+    """
+    results = [r for r in load_results(folder) if r["config"]["use_fltrust"]]
+    if not results:
+        print("No FLTrust-enabled result files found -- skipping trust-over-rounds plot.")
+        return
+
+    rounds, honest_avg, malicious_avg = _honest_vs_malicious_by_round(results)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.set_title("Honest vs Malicious Avg Trust per Round (pooled across all FLTrust configs)", fontsize=13)
+    ax.set_xlabel("Round")
+    ax.set_ylabel("Avg trust score")
+    ax.set_ylim(0, 1.05)
+    ax.grid(True, alpha=0.3)
+    ax.plot(rounds, honest_avg, color=HONEST_COLOR, linewidth=2, marker="o", markersize=3, label="Honest")
+    ax.plot(rounds, malicious_avg, color=MALICIOUS_COLOR, linewidth=2, marker="o", markersize=3, label="Malicious")
+    ax.legend(fontsize=9, loc="best")
+
+    plt.tight_layout()
+    output_path = os.path.join(folder, "trust_over_rounds.png")
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    print(f"Saved to: {output_path}")
+    plt.close()
+
+
+def visualize_trust_over_rounds_per_config(folder: str) -> None:
+    """
+    Honest vs. malicious average trust score per round, one subplot per
+    FLTrust-enabled config family (pooling that config's own variants, e.g.
+    its different epsilon/topk_ratio values) -- so DP/TopK's effect on trust
+    isn't averaged away against plain-FLTrust configs.
+
+    Args:
+        folder (str): path to folder containing result JSON files.
+    """
+    results = [r for r in load_results(folder) if r["config"]["use_fltrust"]]
+    if not results:
+        print("No FLTrust-enabled result files found -- skipping per-config trust-over-rounds plot.")
+        return
+
+    config_groups = defaultdict(list)
+    for result in results:
+        config_groups[result["config"]["config_id"]].append(result)
+
+    config_ids = sorted(config_groups.keys())
+    cols = min(4, len(config_ids))
+    rows = (len(config_ids) + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 4.5, rows * 4), squeeze=False)
+    fig.suptitle("Honest vs Malicious Avg Trust per Round, per Config", fontsize=14)
+    axes = axes.flatten()
+
+    for idx, config_id in enumerate(config_ids):
+        ax = axes[idx]
+        rounds, honest_avg, malicious_avg = _honest_vs_malicious_by_round(config_groups[config_id])
+
+        ax.set_title(f"Config {config_id}", fontsize=10)
+        ax.set_xlabel("Round", fontsize=8)
+        ax.set_ylabel("Avg trust score", fontsize=8)
+        ax.set_ylim(0, 1.05)
+        ax.grid(True, alpha=0.3)
+        ax.plot(rounds, honest_avg, color=HONEST_COLOR, linewidth=1.5, marker="o", markersize=2, label="Honest")
+        ax.plot(rounds, malicious_avg, color=MALICIOUS_COLOR, linewidth=1.5, marker="o", markersize=2, label="Malicious")
+        ax.legend(fontsize=7, loc="best")
+
+    for idx in range(len(config_ids), len(axes)):
+        axes[idx].set_visible(False)
+
+    plt.tight_layout()
+    output_path = os.path.join(folder, "trust_over_rounds_per_config.png")
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    print(f"Saved to: {output_path}")
+    plt.close()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Visualize FL trilemma results from a results folder.",
@@ -914,7 +1112,8 @@ if __name__ == "__main__":
     )
     parser.add_argument("--plot", type=str,
                         choices=["all", "lines", "bar", "radar", "radar_per_conf", "lines_per_conf",
-                                 "confusion", "f1_chart", "f1_table_per_conf", "label_dist"],
+                                 "confusion", "f1_chart", "f1_table_per_conf", "label_dist",
+                                 "trust_per_client", "trust_rounds", "trust_rounds_per_conf"],
                         default="all",
                         help="which plot to generate (default: all)")
     args = parser.parse_args(args=None if len(sys.argv) > 1 else ["--help"])
@@ -937,3 +1136,9 @@ if __name__ == "__main__":
         visualize_label_distribution(args.folder)
     if args.plot in ("all", "f1_table_per_conf"):
         visualize_f1_tables(args.folder)
+    if args.plot in ("all", "trust_per_client"):
+        visualize_trust_per_client(args.folder)
+    if args.plot in ("all", "trust_rounds"):
+        visualize_trust_over_rounds(args.folder)
+    if args.plot in ("all", "trust_rounds_per_conf"):
+        visualize_trust_over_rounds_per_config(args.folder)

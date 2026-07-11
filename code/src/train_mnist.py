@@ -1,6 +1,7 @@
 import torch
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
+from constants import DATA_ROOT
 from models.mnist_cnn import MnistCNN
 import torch.nn as nn
 
@@ -14,13 +15,13 @@ def initialize_data():
 
     # Download and load MNIST
     train_dataset = datasets.MNIST(
-        root="data/",                   # Path to save dataset to
+        root=DATA_ROOT,                 # Path to save dataset to
         train=True,                     # Data for training
-        download=True,                  
+        download=True,
         transform=transform,            # Transform with predefined transform function
     )
     test_dataset = datasets.MNIST(
-        root="data/",
+        root=DATA_ROOT,
         train=False,
         download=True,
         transform=transform,

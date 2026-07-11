@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from src.client import MnistClient, set_seed
+from src.client import MnistClient, set_seed, iterate_batches
 from src.mechanisms.dp import get_privacy_spent, make_private_with_noise_multiplier, restore_accountant_state, serialize_accountant_state
 from src.mechanisms.topk import topk_sparsify, unflatten
 from src.models import get_dataset_spec
@@ -30,6 +30,8 @@ class LabelFlipClient(MnistClient):
         num_rounds (int):      number of training rounds (each with 1 epoch) planned.
         seed (int | None):     random seed for reproducible model init and per-round training
                                randomness. None keeps the unseeded (different every run) behavior.
+        num_client_iterations_per_round (int | None): SGD steps to take this round instead of a
+                                    full epoch. None keeps the default (1 full epoch).
         dataset_spec (DatasetSpec): model factory + class count for this run's dataset.
                                     Defaults to MNIST.
         device (torch.device):  which device to train/evaluate on. Defaults to CPU.
@@ -38,9 +40,11 @@ class LabelFlipClient(MnistClient):
     def __init__(self, client_id, train_loader, test_loader,
                  source_label=7, target_label=1, use_dp=False, epsilon=10.0, delta=1e-5,
                  use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None,
+                 num_client_iterations_per_round=None,
                  dataset_spec=get_dataset_spec("mnist"), device=torch.device("cpu")):
         super().__init__(client_id, train_loader, test_loader, use_dp, epsilon, delta,
                          use_topk=use_topk, topk_ratio=topk_ratio, num_rounds=num_rounds, seed=seed,
+                         num_client_iterations_per_round=num_client_iterations_per_round,
                          dataset_spec=dataset_spec, device=device)
         self.source_label = source_label
         self.target_label = target_label
@@ -85,10 +89,11 @@ class LabelFlipClient(MnistClient):
             opt_tmp = self.optimizer
             train_loader = self.train_loader
 
-        # Training loop
+         # Training loop. None -> one full epoch. If set it does exactly that many SGD steps, matching the steps the FLTrust reference model takes this round
         model_tmp.train()
+        num_steps = self.num_client_iterations_per_round or len(train_loader)
 
-        for images, labels in train_loader:
+        for images, labels in iterate_batches(train_loader, num_steps):
             images, labels = images.to(self.device), labels.to(self.device)
             # Flip source_label <-> target_label
             # TODO Try to use other numbers
@@ -107,7 +112,7 @@ class LabelFlipClient(MnistClient):
             self.model.load_state_dict(model_tmp._module.state_dict())
             
         updated_parameters = self.get_parameters(config={})
-        metrics = {"is_malicious": float(self.is_malicious)}
+        metrics = {"is_malicious": float(self.is_malicious), "client_id": self.client_id}
 
         if self.use_topk:
             flat_before = np.concatenate([p.flatten() for p in parameters])
@@ -166,6 +171,9 @@ class RandomGradientClient(MnistClient):
         num_rounds (int):      number of training rounds (each with 1 epoch) planned.
         seed (int | None):     random seed for reproducible model init and per-round training
                                randomness. None keeps the unseeded (different every run) behavior.
+        num_client_iterations_per_round (int | None): SGD steps to take this round instead of a
+                                    full epoch. Only the DP path (via super().fit()) uses this.
+                                    None keeps the default (1 full epoch).
         dataset_spec (DatasetSpec): model factory + class count for this run's dataset.
                                     Defaults to MNIST. Only the DP path (via
                                     super().fit()) ever constructs a model, so this
@@ -178,9 +186,11 @@ class RandomGradientClient(MnistClient):
     def __init__(self, client_id, train_loader, test_loader,
                  use_dp=False, epsilon=10.0, delta=1e-5,
                  use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None,
+                 num_client_iterations_per_round=None,
                  dataset_spec=get_dataset_spec("mnist"), device=torch.device("cpu")):
         super().__init__(client_id, train_loader, test_loader, use_dp, epsilon, delta,
                          use_topk=use_topk, topk_ratio=topk_ratio, num_rounds=num_rounds, seed=seed,
+                         num_client_iterations_per_round=num_client_iterations_per_round,
                          dataset_spec=dataset_spec, device=device)
         self.is_malicious = True
 
@@ -217,7 +227,7 @@ class RandomGradientClient(MnistClient):
         noise = np.random.randn(*flat_before.shape)
         noise = noise / np.linalg.norm(noise)  # unit-norm direction -- see class docstring
 
-        metrics = {"is_malicious": float(self.is_malicious)}
+        metrics = {"is_malicious": float(self.is_malicious), "client_id": self.client_id}
         if self.use_topk:
             # Sparsify the noise itself, same as an honest client sparsifies its real update
             noise = topk_sparsify(noise, self.topk_ratio)
@@ -297,6 +307,7 @@ def build_malicious_client(client_id, train_loader, test_loader, attack_type, at
                            source_label=3, target_label=7,
                            use_dp=False, epsilon=10.0, delta=1e-5,
                            use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None,
+                           num_client_iterations_per_round=None,
                            dataset_spec=get_dataset_spec("mnist"), device=torch.device("cpu")):
     """
     Construct the malicious client for one Byzantine slot.
@@ -325,6 +336,8 @@ def build_malicious_client(client_id, train_loader, test_loader, attack_type, at
         num_rounds (int):      number of training rounds (each with 1 epoch) planned.
         seed (int | None):     random seed for reproducible model init and per-round training
                                randomness. None keeps the unseeded (different every run) behavior.
+        num_client_iterations_per_round (int | None): SGD steps to take this round instead of a
+                                    full epoch. None keeps the default (1 full epoch).
         dataset_spec (DatasetSpec): model factory + class count for this run's dataset.
                                     Defaults to MNIST.
         device (torch.device):  which device to train/evaluate on. Defaults to CPU.
@@ -339,6 +352,7 @@ def build_malicious_client(client_id, train_loader, test_loader, attack_type, at
         use_dp=use_dp, epsilon=epsilon, delta=delta,
         use_topk=use_topk, topk_ratio=topk_ratio,
         num_rounds=num_rounds, seed=seed,
+        num_client_iterations_per_round=num_client_iterations_per_round,
         dataset_spec=dataset_spec, device=device,
     )
     if attack_type == "label_flip":

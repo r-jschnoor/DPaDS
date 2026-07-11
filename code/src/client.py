@@ -32,12 +32,34 @@ def set_seed(seed):
     torch.manual_seed(seed)
 
 
+def iterate_batches(loader, num_steps):
+    """
+    Yield exactly num_steps batches from loader, cycling back to the start
+    (with a fresh shuffle) if num_steps exceeds one epoch's worth of batches.
+
+    Args:
+        loader (DataLoader): source of (images, labels) batches.
+        num_steps (int):     how many batches to yield in total.
+
+    Returns:
+        Iterator yielding num_steps (images, labels) batches.
+    """
+    it = iter(loader)
+    for _ in range(num_steps):
+        try:
+            yield next(it)
+        except StopIteration:
+            it = iter(loader)
+            yield next(it)
+
+
 class MnistClient(fl.client.NumPyClient):
     """Flower client wrapping our MNIST training loop."""
 
     def __init__(self, client_id, train_loader, test_loader,
                  use_dp=False, epsilon=10.0, delta=1e-5,
                  use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None,
+                 num_client_iterations_per_round=None,
                  dataset_spec=get_dataset_spec("mnist"), device=torch.device("cpu")):
         self.client_id = client_id
         self.seed = seed
@@ -57,6 +79,7 @@ class MnistClient(fl.client.NumPyClient):
         self.use_topk = use_topk
         self.topk_ratio = topk_ratio
         self.num_rounds = num_rounds
+        self.num_client_iterations_per_round = num_client_iterations_per_round
         self.privacy_engine = None
         self.is_malicious = False
 
@@ -167,10 +190,11 @@ class MnistClient(fl.client.NumPyClient):
             opt_tmp = self.optimizer
             train_loader = self.train_loader
 
-        # Training loop
+        # Training loop. None -> one full epoch. If set it does exactly that many SGD steps, matching the steps the FLTrust reference model takes this round
         model_tmp.train()
+        num_steps = self.num_client_iterations_per_round or len(train_loader)
 
-        for images, labels in train_loader:
+        for images, labels in iterate_batches(train_loader, num_steps):
             images, labels = images.to(self.device), labels.to(self.device)
             opt_tmp.zero_grad()
             outputs = model_tmp(images)
@@ -183,7 +207,7 @@ class MnistClient(fl.client.NumPyClient):
             self.model.load_state_dict(model_tmp._module.state_dict())
             
         updated_parameters = self.get_parameters(config={})
-        metrics = {"is_malicious": float(self.is_malicious)}
+        metrics = {"is_malicious": float(self.is_malicious), "client_id": self.client_id}
 
         if self.use_topk:
             # Compute update -> weights now - global weights

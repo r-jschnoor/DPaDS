@@ -17,6 +17,7 @@ import warnings
 import logging
 
 from src.client import MnistClient, set_seed
+from src.constants import DATA_ROOT
 from src.experiment_config import ExperimentConfig
 from src.mechanisms.attacks import build_malicious_client
 from src.mechanisms.robust_aggregation import FLTrustStrategy
@@ -150,6 +151,14 @@ class HistoryStrategyAdapter:
 
         params, metrics = super().aggregate_fit(server_round, results, failures)
 
+        # Per-client malicious flag, keyed by each client's own reported client_id
+        malicious_metrics = {
+            f"malicious_{int(fit_result.metrics['client_id'])}": float(fit_result.metrics.get("is_malicious", 0.0))
+            for _, fit_result in results
+            if "client_id" in fit_result.metrics
+        }
+        metrics = {**(metrics or {}), **malicious_metrics}
+
         if metrics:
             for key, val in metrics.items():
                 self.history["metrics_distributed_fit"].setdefault(key, [])
@@ -276,15 +285,15 @@ def load_datasets(root_dataset_size, seed=None, dataset="mnist"):
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
-        train_dataset = datasets.CIFAR10(root="data/", train=True,  download=True, transform=transform)
-        test_dataset  = datasets.CIFAR10(root="data/", train=False, download=True, transform=transform)
+        train_dataset = datasets.CIFAR10(root=DATA_ROOT, train=True,  download=True, transform=transform)
+        test_dataset  = datasets.CIFAR10(root=DATA_ROOT, train=False, download=True, transform=transform)
     else:
         transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.5,), (0.5,))
         ])
-        train_dataset = datasets.MNIST(root="data/", train=True,  download=True, transform=transform)
-        test_dataset  = datasets.MNIST(root="data/", train=False, download=True, transform=transform)
+        train_dataset = datasets.MNIST(root=DATA_ROOT, train=True,  download=True, transform=transform)
+        test_dataset  = datasets.MNIST(root=DATA_ROOT, train=False, download=True, transform=transform)
 
     # Stratified split -> root_indices has every label represented in the
     # same proportions as the full training set. client_pool_indices is
@@ -381,6 +390,7 @@ def get_client_fn(train_dataset, client_pool_indices, num_clients,
                   use_topk=False, topk_ratio=0.1, num_rounds=1, seed=None,
                   attack_type="label_flip", attack_scale=None,
                   source_label=3, target_label=7,
+                  num_client_iterations_per_round=None,
                   dataset_spec=get_dataset_spec("mnist"), device=torch.device("cpu")):
     """
     Returns a function that creates a client with it own data slice.
@@ -416,6 +426,8 @@ def get_client_fn(train_dataset, client_pool_indices, num_clients,
                                  attack_type="label_flip".
         target_label (int):      the class index malicious clients relabel it as. Only used when
                                  attack_type="label_flip".
+        num_client_iterations_per_round (int | None): SGD steps to take per round instead of a
+                                    full epoch. None keeps the default (1 full epoch).
         dataset_spec (DatasetSpec): model factory + class count for this run's dataset.
                                     Defaults to MNIST.
         device (torch.device):      which device clients train/evaluate on. Defaults to CPU.
@@ -466,6 +478,7 @@ def get_client_fn(train_dataset, client_pool_indices, num_clients,
                 use_dp=use_dp, epsilon=epsilon, delta=delta,
                 use_topk=use_topk, topk_ratio=topk_ratio,
                 num_rounds=num_rounds, seed=seed,
+                num_client_iterations_per_round=num_client_iterations_per_round,
                 dataset_spec=dataset_spec, device=device,
             ).to_client()
 
@@ -474,6 +487,7 @@ def get_client_fn(train_dataset, client_pool_indices, num_clients,
             use_dp=use_dp, epsilon=epsilon, delta=delta,
             use_topk=use_topk, topk_ratio=topk_ratio,
             num_rounds=num_rounds, seed=seed,
+            num_client_iterations_per_round=num_client_iterations_per_round,
             dataset_spec=dataset_spec, device=device,
         ).to_client()
     
@@ -562,6 +576,7 @@ def weighted_average_metrics(metrics):
     common_keys = set(metrics[0][1].keys())
     for _, metric in metrics[1:]:
         common_keys &= set(metric.keys())
+    common_keys -= {"client_id"}  # per-client identifier, not meant to be averaged
 
     for key in common_keys:
         # Need to skip non-numeric metrics like accountant_state
@@ -649,6 +664,7 @@ def run_simulation_with_config(config: ExperimentConfig, max_cpus: int | None = 
             accountant_manager=accountant_manager,
             root_loader=root_loader,
             rescale_to_ref_norm=config.rescale_to_ref_norm,
+            num_client_iterations_per_round=config.num_client_iterations_per_round,
             dataset_spec=dataset_spec, device=device,
             fraction_fit=1.0,
             fraction_evaluate=0.0,           # Skip federated eval -- evaluate_fn does it centrally instead
@@ -688,6 +704,7 @@ def run_simulation_with_config(config: ExperimentConfig, max_cpus: int | None = 
             num_rounds=config.num_rounds, seed=config.seed,
             attack_type=config.attack_type, attack_scale=config.attack_scale,
             source_label=config.source_label, target_label=config.target_label,
+            num_client_iterations_per_round=config.num_client_iterations_per_round,
             dataset_spec=dataset_spec, device=device,
         )
     )

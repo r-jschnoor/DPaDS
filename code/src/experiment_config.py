@@ -38,6 +38,12 @@ class ExperimentConfig:
                                 attack_type="label_flip".
         target_label (int):     the digit malicious clients relabel it as. Only used when
                                 attack_type="label_flip".
+        num_client_iterations_per_round (int | None): if set, both clients and (when
+                                use_fltrust=True) the FLTrust reference model take exactly
+                                this many SGD steps per round instead of a full local epoch
+                                -- matching the FLTrust paper's shared Rl between client and
+                                server. None keeps the default (1 full epoch for clients,
+                                ref_num_epochs for the reference model).
     """
     config_id:          int
     dataset:            str   = "mnist"
@@ -57,3 +63,4 @@ class ExperimentConfig:
     attack_scale:       float | None = None
     source_label:       int   = 3
     target_label:       int   = 7
+    num_client_iterations_per_round: int | None = None

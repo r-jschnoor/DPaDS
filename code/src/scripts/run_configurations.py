@@ -242,25 +242,25 @@ def save_results(config: ExperimentConfig, history,
     accuracies = dict(history["metrics_distributed_evaluate"].get("accuracy", []))
     epsilons   = dict(history["metrics_distributed_fit"].get("epsilon", []))
 
-    # FLTrust reports one trust_score_<node_id> metric per client per round
-    # -> regroup into {round: {node_id: score}} for the results file.
+    # FLTrust reports one trust_score_<client_id> metric per client per round
+    # -> regroup into {round: {client_id: score}} for the results file.
     trust_scores_by_round = {}
     for key, per_round in history["metrics_distributed_fit"].items():
         if not key.startswith("trust_score_"):
             continue
-        node_id = key[len("trust_score_"):]
+        client_id = key[len("trust_score_"):]
         for r, score in per_round:
-            trust_scores_by_round.setdefault(r, {})[node_id] = round(score, 4)
+            trust_scores_by_round.setdefault(r, {})[client_id] = round(score, 4)
 
     # Client-is-Malicious Data is reported once per round -> collapse into a
-    # single {node_id: bool} block instead of repeating.
+    # single {client_id: bool} block instead of repeating.
     malicious_clients = {}
     for key, per_round in history["metrics_distributed_fit"].items():
         if not key.startswith("malicious_"):
             continue
-        node_id = key[len("malicious_"):]
+        client_id = key[len("malicious_"):]
         if per_round:
-            malicious_clients[node_id] = bool(per_round[0][1])
+            malicious_clients[client_id] = bool(per_round[0][1])
 
     per_class_scores, confusion_matrix = inflate_confusion_matrix_and_calculate_scores(config, history)
 
@@ -271,6 +271,7 @@ def save_results(config: ExperimentConfig, history,
             "num_clients": config.num_clients,
             "num_rounds": config.num_rounds,
             "num_byzantine": config.num_byzantine,
+            "seed": config.seed,
             "use_dp": config.use_dp,
             "epsilon": config.epsilon,
             "delta": config.delta,
@@ -289,8 +290,8 @@ def save_results(config: ExperimentConfig, history,
             "noise_multiplier": dict(history["metrics_distributed_fit"].get("noise_multiplier", [])).get(1),  # same across all rounds -> take round 1
             "confusion_matrix": confusion_matrix,
             "per_class_scores": per_class_scores,
-            "label_distribution": history.get("label_distribution"),  # static per run -- see compute_label_distribution()
-            "malicious_clients": malicious_clients,  # static per run -- {node_id: bool}, FLTrust configs only
+            "label_distribution": history.get("label_distribution"),  # static per run -> see compute_label_distribution()
+            "malicious_clients": malicious_clients,  # static per run -> {client_id: bool}
             "per_round": [
                 {
                     "round": r,
