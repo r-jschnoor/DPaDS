@@ -2,6 +2,8 @@
 
 <!-- -> Print gradients to check (mit info ob honest oder nicht) -->
 
+Sort bars in bar_accuracy
+
 -----
 
 ### New stuff:

@@ -43,6 +43,10 @@ SHARED_PARAMS = dict(
                                    # factor for the wrapped attack variant.
     source_label = 3,             # Only used when attack_type="label_flip".
     target_label = 7,
+    num_client_iterations_per_round = None,  # None -> default (1 full local epoch per
+                                   # round, for both clients and the FLTrust reference
+                                   # model). Set to an int (e.g. 1) to match the FLTrust
+                                   # paper's shared Rl between client and server instead.
 )
 
 
@@ -153,6 +157,8 @@ def make_filename(config: ExperimentConfig, run_timestamp: str) -> str:
     ]
     if config.attack_scale is not None and config.attack_scale != 1.0:
         parts.append(f"scale-{config.attack_scale}")
+    if config.num_client_iterations_per_round is not None:
+        parts.append(f"Rl-{config.num_client_iterations_per_round}")
     return "_".join(parts) + ".json"
 
 
@@ -284,6 +290,7 @@ def save_results(config: ExperimentConfig, history,
             "attack_scale": config.attack_scale,
             "source_label": config.source_label if config.attack_type == "label_flip" else None,
             "target_label": config.target_label if config.attack_type == "label_flip" else None,
+            "num_client_iterations_per_round": config.num_client_iterations_per_round,
         },
         "results": {
             "elapsed_seconds": elapsed_seconds,
