@@ -227,6 +227,9 @@ def visualize_bar_chart_per_config(folder: str) -> None:
         folder (str): path to folder containing result JSON files.
     """
     results = load_results(folder)
+    
+    config = results[0].get('config') if results else None
+    dataset = config.get('dataset', 'Undefined') if config else 'Undefined'
 
     # Group results
     groups = {}
@@ -251,7 +254,6 @@ def visualize_bar_chart_per_config(folder: str) -> None:
 
     # Plot
     fig, ax = plt.subplots(figsize=(16, 6))
-    dataset = results[0]['config']['dataset'] if results[0] and results[0]['config'] and results[0]['config']['dataset'] else 'Undefined'
     ax.set_title(f"Final Round Accuracy per Config Variant ({dataset})", fontsize=13)
     ax.set_ylabel("Accuracy")
     ax.set_ylim(0, 1.05)
