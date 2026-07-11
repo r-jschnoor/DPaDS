@@ -466,3 +466,148 @@ If this resurfaces on a different machine: confirm it's this same issue with the
 otherwise looks identical to a real bug (it surfaces inside `cifar10_cnn.py`'s first conv layer).
 Not fixable from within this repo or a venv alone if it turns out to need an actual driver
 update -- pin to an older cuDNN build as above instead.
+
+## FLTrust trust-score decay investigation
+
+`TODO.md`'s "Revisit trust scores" item flagged that honest-client trust scores don't reach the
+expected high values and get worse over training, rather than staying high. This section documents
+the investigation: what was ruled out, what the literature actually specifies, the fix that worked,
+and the tradeoff it comes with.
+
+### The problem, quantified
+
+CIFAR-10, config 3 (FLTrust only, no DP/TopK), 100 rounds (`20260711_020358`): honest-client average
+trust fell from 0.44 (round 1) to 0.32 (round 10) to 0.12 (round 100), while malicious-client trust
+followed almost the same trajectory (0.50 -> 0.25 -> 0.12) -- the scores weren't just low, they were
+barely distinguishing honest from malicious at all, and both decayed together toward the near-zero
+baseline expected of two uncorrelated high-dimensional random vectors. Model accuracy kept improving
+throughout (10% -> 51.5%), so this isn't the `total_trust == 0` skip-round path (bug 1 above) --
+aggregation was working, just not discriminating well, and getting worse at it over time.
+
+### Ruled out: root dataset size alone
+
+First hypothesis: `root_dataset_size` (1000-2000 in production runs) is small relative to the model,
+so the server's reference direction is dominated by which specific images happen to be in the root
+set rather than a representative gradient direction, and this idiosyncrasy compounds as the root set
+never gets refreshed across a run. Swept `root_dataset_size` in {500, 1000, 2000, 5000} on MNIST (6
+clients, 2 Byzantine, 15 rounds, `ref_num_epochs=3` fixed, seed=42), holding everything else equal:
+honest trust at round 15 rose monotonically with root size (0.11 -> 0.10 -> 0.17 -> 0.22), and so did
+the honest/malicious gap (malicious converged to exactly 0.0 in every condition by round 15). Final
+accuracy was unaffected by root size (0.976-0.978 across all four) -- a real, free improvement, but
+the decay-over-rounds pattern persisted in every condition, just from a higher starting point. Root
+size helps the *level*, not the *trend* -- ruled out as the primary fix.
+
+### What the literature actually says
+
+Pulled the original FLTrust paper ([Cao et al., NDSS 2021](https://arxiv.org/pdf/2012.13995)) and
+read its algorithm and default hyperparameters directly, rather than assuming our recipe matched it.
+Two things didn't match our implementation:
+
+- **The paper's default recipe uses `Rl=1`** -- a single SGD step per round, for *both* the client
+  and the server's reference model, not multiple local epochs. For MNIST specifically: 100 clients,
+  a 100-sample root set, 1 local iteration per round, 2000 global rounds to compensate (Table I).
+- **Their convergence proof (Theorem 1) is stated specifically for `Rl=1`.** The theoretical
+  guarantee FLTrust is built on doesn't cover multi-epoch local training.
+
+Our implementation did something structurally different: clients trained 1 full local epoch per
+round (tens to hundreds of SGD steps depending on shard size), while the server trained
+`ref_num_epochs=3` full epochs over the (much smaller) root set -- neither side matched the paper's
+balanced single-step design, and the two sides didn't even match each other in step count (the
+existing "reference update norm is ~6x smaller than a client's" note in `get_reference_update()`'s
+docstring was a direct symptom of this). This lines up with a separate, well-documented phenomenon in
+the broader FL literature -- **client drift**: the more local SGD steps a client takes per round, the
+more its update reflects its own local data's curvature rather than a shared direction, especially as
+the global model approaches convergence and different clients' local optima start to genuinely
+disagree with each other (see FedProx and SCAFFOLD). That would explain both symptoms observed here:
+weak trust separation (drift affects the reference-vs-client comparison) and decay over rounds (drift
+gets worse, not better, as training progresses).
+
+### Fix: `num_client_iterations_per_round`
+
+Added `ExperimentConfig.num_client_iterations_per_round` (`int | None`, default `None` = unchanged
+behavior): when set, both clients (`client.py`, `mechanisms/attacks.py`) and, when `use_fltrust=True`,
+the FLTrust reference model (`mechanisms/robust_aggregation.py`) take exactly that many SGD steps per
+round instead of a full local epoch -- directly operationalizing the paper's shared `Rl` as one config
+value instead of two independently-tuned epoch counts. A small shared helper, `iterate_batches(loader,
+num_steps)` (`client.py`), yields exactly `num_steps` batches, cycling the loader (with a fresh
+shuffle each cycle, since `DataLoader.__iter__` draws a new permutation every call) if `num_steps`
+exceeds one epoch's worth -- this decouples "how many SGD steps to take" from "how many batches this
+particular shard/root set happens to contain." `get_reference_update()` was refactored to always be
+step-based via this helper (callers translate `ref_num_epochs` into an equivalent step count when
+`num_client_iterations_per_round` isn't set, reproducing the old behavior exactly, including the same
+reshuffle cadence).
+
+Note on data coverage at `Rl=1`: since Flower recreates each client object (and its `DataLoader`)
+fresh every round, and `DataLoader.__iter__` reshuffles on every call regardless, a single step per
+round does *not* mean the client keeps training on the same batch -- each round draws a genuinely
+different random batch, and over many rounds this converges to ordinary sampling-with-replacement
+coverage of the full shard, matching how the paper's Algorithm 1 phrases it ("randomly sample a batch
+$D_b$ from $D$" each iteration). The server's `root_loader` gets the same treatment since it's a
+persistent object but `iter(root_loader)` is still called fresh inside `aggregate_fit()` every round.
+
+### Result: decay is eliminated -- at the cost of much slower convergence
+
+Tested `num_client_iterations_per_round=1` against a same-setup baseline run (MNIST, config 3, 50
+clients, 10 Byzantine, root=2000, seed=42, `attack_scale=2.0`, 600 rounds) that predates
+`num_client_iterations_per_round` being wired into `run_configurations.py`'s `SHARED_PARAMS` (an
+early gap in this work -- it existed on `ExperimentConfig` and was fully threaded through the
+simulation internals, but had no way to actually be set via the script until fixed), so it used the
+default full-local-epoch behavior. The two runs are otherwise directly comparable:
+
+| | full local epoch/round (default) | `num_client_iterations_per_round=1` |
+|---|---|---|
+| honest trust, round 1 | 0.90 | 0.27 |
+| honest trust, round 5 (peak) | 0.96 | -- |
+| honest trust, round 100 | 0.046 | 0.229 |
+| honest trust, round 600 | 0.009 | 0.322 |
+| honest trust, first half avg (r1-300) | -- | 0.253 |
+| honest trust, second half avg (r301-600) | -- | 0.432 |
+| malicious trust, round 20 onward | 0.000 (exact) | fluctuates, 0.12-0.34 |
+| accuracy, round 10 | 0.849 | 0.150 |
+| accuracy, round 200 | 0.982 | 0.626 |
+| accuracy, round 600 | 0.987 | 0.878 |
+
+Under the default (full-epoch) regime, honest trust peaks early (round ~5) then decays monotonically
+toward zero and stays there through round 600 -- the original problem, reproduced at a much longer
+horizon than earlier tests, confirming it doesn't self-correct given more rounds. Under `Rl=1`, the
+trend reverses: honest trust *rises* over the course of training (0.253 -> 0.432, first half to second
+half average) instead of decaying, and never approaches zero at any point in the 600 rounds. This
+directly confirms the client-drift hypothesis -- removing the local-step imbalance removes the
+mechanism that was eroding trust scores as training progressed.
+
+**The tradeoff is real and substantial: `Rl=1` trains far slower.** Accuracy reaches only 87.8% by
+round 600, versus 98.7% by round 200 under the default regime -- roughly 3x the rounds for meaningfully
+worse accuracy at the point this run stopped. This is the direct, expected cost of matching the
+paper's design: far more communication rounds are needed to reach comparable model quality, exactly
+as the paper's own `Rg=2000` (vs. our tested 600) anticipates. Anyone adopting `Rl=1` needs to budget
+for substantially more rounds, or accept a lower-accuracy operating point, in exchange for trust
+scores that stay meaningful throughout training instead of collapsing.
+
+**Not fully solved by this fix**: per-round honest/malicious *separation* is still noisy under `Rl=1`.
+Aggregated over all 600 rounds (24,000 honest vs. 6,000 malicious trust-score observations), honest
+averages 0.343 vs. malicious's 0.278 -- a real, persistent gap -- but in any given individual round
+the ordering is unreliable (malicious trust exceeded honest trust in several individual rounds, e.g.
+rounds 5, 50, 100, 150, 350, 400). This tracks with each round's score now being based on a single
+mini-batch comparison on each side, which is inherently higher-variance than the old multi-batch
+epoch-averaged estimate. Decay (the trend problem) and separation reliability (the noise problem) are
+distinct issues -- this fix addresses the former; the latter would need a different intervention (e.g.
+smoothing trust scores over a rolling window of recent rounds rather than trusting each single round
+in isolation), not yet implemented.
+
+### Smoke-test fallout
+
+Fixing `get_reference_update()`'s signature surfaced two pre-existing, unrelated bugs in
+`mechanisms/robust_aggregation.py`'s own `__main__` smoke test (confirmed pre-existing by reproducing
+both against the original unmodified code): it called `strategy.aggregate_fit()` directly without
+`configure_fit()`, leaving `self.saved_global_parameters` as `None` (crash), and its fake `FitRes`
+objects used `metrics={}`, which crashes once `aggregate_fit()` reads `fit_result.metrics['client_id']`
+(added for the client-id metrics work above). Fixed both: `strategy.saved_global_parameters` is now
+set directly (bypassing `configure_fit()`, which would otherwise need a real Flower `ClientManager`
+just to sample clients this test doesn't use), and `make_fit_result()` now takes a `client_id` and
+includes it in `metrics`. **Not fixed**: the test's "honest" fake updates (`ref * 0.9`, `ref + noise`)
+are derived from a *different*, independently-randomly-initialized `MnistCNN()` instance than the one
+`FLTrustStrategy` trains internally when `aggregate_fit()` runs -- two unrelated random directions in
+a ~106K-dim space have near-zero cosine similarity by construction, so the test's "honest" clients
+score just as low as its "malicious" one (confirmed this also happens on the original code, so it
+predates this session). Flagged, not fixed -- the real fix would derive the fake honest updates from
+`strategy.ref_model`'s actual parameters instead of a separate model instance.

@@ -43,10 +43,10 @@ SHARED_PARAMS = dict(
                                    # factor for the wrapped attack variant.
     source_label = 3,             # Only used when attack_type="label_flip".
     target_label = 7,
-    num_client_iterations_per_round = 1,  # None -> default (1 full local epoch per
-                                   # round, for both clients and the FLTrust reference
-                                   # model). Set to an int (e.g. 1) to match the FLTrust
-                                   # paper's shared Rl between client and server instead.
+    num_client_iterations_per_round = None,  # Base/fallback value for non-FLTrust
+                                   # configs (1, 2, 4, 6), which aren't swept over
+                                   # RL_VALUES below. None -> default (1 full local
+                                   # epoch per round).
 )
 
 
@@ -96,6 +96,7 @@ BASE_CONFIGS = {
 # Variants to explore
 EPSILON_VALUES = [1.0, 5.0, 10.0]
 TOPK_VALUES = [0.1, 0.5]
+RL_VALUES = [5, 10, 20]
 
 
 def expand_config(base: ExperimentConfig) -> list[ExperimentConfig]:
@@ -104,7 +105,9 @@ def expand_config(base: ExperimentConfig) -> list[ExperimentConfig]:
 
     Configs with DP enabled get expanded over epsilon values.
     Configs with TopK enabled get expanded over topk_ratio values.
-    Expansions are combined when multiple are enabled.
+    Configs with FLTrust enabled get expanded over RL_VALUES (num_client_iterations_per_round).
+    Expansions are combined when multiple are enabled -- for FLTrust configs that also
+    have DP and/or TopK on (5, 7, 8), this multiplies the variant count accordingly.
 
     Args:
         base (ExperimentConfig): base config to expand.
@@ -114,11 +117,14 @@ def expand_config(base: ExperimentConfig) -> list[ExperimentConfig]:
     """
     epsilons = EPSILON_VALUES if base.use_dp else [base.epsilon]
     topk_vals = TOPK_VALUES if base.use_topk else [base.topk_ratio]
+    rl_vals = RL_VALUES if base.use_fltrust else [base.num_client_iterations_per_round]
 
     variants = []
     for epsilon in epsilons:
         for k in topk_vals:
-            variants.append(replace(base, epsilon=epsilon, topk_ratio=k))
+            for rl in rl_vals:
+                variants.append(replace(base, epsilon=epsilon, topk_ratio=k,
+                                        num_client_iterations_per_round=rl))
     return variants
 
 

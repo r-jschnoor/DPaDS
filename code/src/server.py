@@ -17,7 +17,7 @@ import warnings
 import logging
 
 from src.client import MnistClient, set_seed
-from src.constants import DATA_ROOT
+from src.constants import CLIENT_BATCH_SIZE, DATA_ROOT
 from src.experiment_config import ExperimentConfig
 from src.mechanisms.attacks import build_malicious_client
 from src.mechanisms.robust_aggregation import FLTrustStrategy
@@ -309,8 +309,8 @@ def load_datasets(root_dataset_size, seed=None, dataset="mnist"):
     )
 
     root_subset = Subset(train_dataset, root_indices)
-    # Larger than the client batch_size on purpose
-    root_loader = DataLoader(root_subset, batch_size=128, shuffle=True)
+    # Matches CLIENT_BATCH_SIZE (The FLTrust paper's Algorithm 2 uses one shared batch size for both the client and server ModelUpdate() calls)
+    root_loader = DataLoader(root_subset, batch_size=CLIENT_BATCH_SIZE, shuffle=True)
 
     return train_dataset, test_dataset, root_loader, client_pool_indices
 
@@ -465,7 +465,7 @@ def get_client_fn(train_dataset, client_pool_indices, num_clients,
         end = start + slice_size
 
         client_train = Subset(train_dataset, client_pool_indices[start:end])
-        train_loader = DataLoader(client_train, batch_size=32, shuffle=True)
+        train_loader = DataLoader(client_train, batch_size=CLIENT_BATCH_SIZE, shuffle=True)
         # Evaluation is centralized on the server (see make_evaluate_fn) --
         # clients no longer need their own test_loader.
 
