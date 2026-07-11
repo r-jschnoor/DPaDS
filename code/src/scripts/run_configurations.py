@@ -43,7 +43,7 @@ SHARED_PARAMS = dict(
                                    # factor for the wrapped attack variant.
     source_label = 3,             # Only used when attack_type="label_flip".
     target_label = 7,
-    num_client_iterations_per_round = None,  # None -> default (1 full local epoch per
+    num_client_iterations_per_round = 1,  # None -> default (1 full local epoch per
                                    # round, for both clients and the FLTrust reference
                                    # model). Set to an int (e.g. 1) to match the FLTrust
                                    # paper's shared Rl between client and server instead.
