@@ -422,3 +422,47 @@ genuinely infeasible at this sample_rate/round count; the fix is either dropping
 (larger per-client dataset share, e.g. fewer clients or a larger `root_dataset_size` trade-off,
 per the earlier root-dataset-size discussion) -- not something fixable in `compute_noise_multiplier()`
 itself.
+
+## Limitation: cuDNN 9.20.x fails on some driver/GPU combinations (CIFAR-10 + GPU)
+
+On one remote machine (2x RTX 4090, driver 595.71.05, CUDA 13.2), any `torch.nn.Conv2d` call on
+`cuda` -- including the plain non-DP forward pass in `Cifar10ResNet20`, unrelated to this
+project's own code -- fails with:
+```
+RuntimeError: cuDNN error: CUDNN_STATUS_SUBLIBRARY_VERSION_MISMATCH
+```
+This reproduces with a bare `torch.nn.Conv2d(3, 16, 3, 1, 1).cuda()` call, no Flower/Ray/FL code
+involved, so it's not a bug in `models/cifar10_cnn.py`, `resolve_device()`, or the device-threading
+work above -- it's an environment issue on that specific machine. Ruled out, in order: a stray
+`LD_LIBRARY_PATH` shadowing the bundled cuDNN with a system copy (pinning `LD_LIBRARY_PATH` to the
+exact matched bundled cuDNN dir didn't help), a corrupted/mismatched `nvidia-cudnn-cu13` pip
+install (a from-scratch `pip install --force-reinstall` of a byte-identical, confirmed-working
+(on a local RTX 4060 Ti, same driver-generation/compute-capability 8.9) `torch==2.12.1+cu130`
+still failed identically), and a stale on-disk cuDNN JIT kernel cache under `~/.nv/ComputeCache`
+(clearing it didn't help either). Also reproduces with `TORCH_CUDNN_V8_API_DISABLED=1` (forcing
+cuDNN's older, pre-graph-API heuristics path), so it isn't specific to cuDNN 9's newer
+`CUDNN_BACKEND_TENSOR_DESCRIPTOR` graph API either.
+
+What actually fixed it: cuDNN 9 introduced a modular split into sub-libraries (`cudnn_cnn`,
+`cudnn_ops`, `cudnn_graph`, etc.) that didn't exist in earlier cuDNN builds. On this driver, only
+the specific `nvidia-cudnn-cu13-9.20.0.48` build (the one that ships with `torch==2.12.1`/`2.13.0`
++cu130) hits this; stepping back to a build bundling the earlier `nvidia-cudnn-cu12-9.1.0.70`
+(still cuDNN 9, just a much earlier point release) works fine. Confirmed fix, satisfying both this
+project's `pyproject.toml` (`torch>=2.6`) and Opacus's (`torch>=2.6.0`) floors:
+```
+pip install --force-reinstall --no-cache-dir torch==2.6.0 torchvision==0.21.0 \
+    --extra-index-url https://download.pytorch.org/whl/cu121
+```
+Use `--extra-index-url`, not `--index-url`: the latter replaces PyPI entirely for that install,
+and PyTorch's own package index has a `typing_extensions`/`typing-extensions` metadata-naming
+mismatch (PEP 503 normalization) that makes pip reject every candidate it offers for that
+dependency with no PyPI fallback to try instead. Also reinstall `torch`/`torchvision` together,
+not one at a time -- reinstalling only `torch` while an incompatible `torchvision` pin (e.g.
+`torchvision==0.28.0`, which requires `torch==2.13.0`) is still installed lets pip's resolver
+silently keep satisfying the old pin instead of actually downgrading.
+
+If this resurfaces on a different machine: confirm it's this same issue with the isolated
+`Conv2d.cuda()` repro above (no FL code) before assuming a code regression, since the traceback
+otherwise looks identical to a real bug (it surfaces inside `cifar10_cnn.py`'s first conv layer).
+Not fixable from within this repo or a venv alone if it turns out to need an actual driver
+update -- pin to an older cuDNN build as above instead.
