@@ -350,13 +350,13 @@
 			Base &  &  &  \\ \hline
 			\rowcolor[HTML]{EFEFEF} 
 			DP & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} &  &  \\ \hline
-			ROB &  & \multicolumn{1}{c}{x} &  \\ \hline
+			FLTrust &  & \multicolumn{1}{c}{x} &  \\ \hline
 			\rowcolor[HTML]{EFEFEF} 
-			COM &  &  & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} \\ \hline
-			DP+ROB & \multicolumn{1}{c}{x} & \multicolumn{1}{c}{x} &  \\ \hline
+			TOPK &  &  & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} \\ \hline
+			DP+FLTrust & \multicolumn{1}{c}{x} & \multicolumn{1}{c}{x} &  \\ \hline
 			\rowcolor[HTML]{EFEFEF} 
-			DP+COM & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} &  & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} \\ \hline
-			ROB+COM &  & \multicolumn{1}{c}{x} & \multicolumn{1}{c}{x} \\ \hline
+			DP+TOPK & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} &  & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} \\ \hline
+			FLTrust+TOPK &  & \multicolumn{1}{c}{x} & \multicolumn{1}{c}{x} \\ \hline
 			\rowcolor[HTML]{EFEFEF} 
 			ALL & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} \\ \hline
 		\end{tabular}
@@ -551,4 +551,10 @@
 	\bibliographystyle{IEEEtran}
 	\bibliography{bib.bib}
 	
+	\section{APPENDIX}
+	
+	\begin{figure}
+		\includegraphics{img/MNIST_07-10/label_distribution.png}
+		\label{fig:labeldistr}
+	\end{figure}
 \end{document}

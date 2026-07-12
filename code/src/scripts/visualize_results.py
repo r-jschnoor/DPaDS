@@ -205,7 +205,7 @@ def visualize_lines_per_config(folder: str) -> None:
 
     for config_id, group_results in sorted(config_groups.items()):
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-        fig.suptitle(f"Config {config_id} - Per Round Metrics", fontsize=13)
+        fig.suptitle(replaceConfigWithLabel(str(config_id)) + " - Per Round Metrics", fontsize=13)
 
         for ax, metric in zip(axes, metrics):
             ax.set_title(titles[metric])
@@ -308,7 +308,7 @@ def visualize_bar_chart_per_config(folder: str) -> None:
         # center the group label under its bars
         group_center = (group_start + x - bar_width - 0.1) / 2
         tick_pos.append(group_center)
-        tick_lab.append(f"Config {config_id}")
+        tick_lab.append(replaceConfigWithLabel(str(config_id)))
         x += gap
 
     ax.set_xticks(tick_pos)
@@ -564,7 +564,7 @@ def visualize_radar_chart_per_config(folder: str) -> None:
         ax      = axes[idx]
         variants = config_groups[config_id]
 
-        ax.set_title(f"Config {config_id}", fontsize=10, pad=10)
+        ax.set_title(replaceConfigWithLabel(str(config_id)), fontsize=10, pad=10)
 
         for i, (label, scores) in enumerate(variants):
             values  = [scores[PRIVACY_KEY],
@@ -633,7 +633,7 @@ def visualize_confusion_matrices(folder: str) -> None:
         mat_norm = np.where(row_sums > 0, mat / row_sums, 0)
 
         im = ax.imshow(mat_norm, interpolation="nearest", cmap="Blues", vmin=0, vmax=1)
-        ax.set_title(f"Config {config_id}\n{label}", fontsize=7)
+        ax.set_title(f"{replaceConfigWithLabel(str(config_id))}\n{label}", fontsize=7)
         ax.set_xlabel("Predicted", fontsize=8)
         ax.set_ylabel("True", fontsize=8)
         ax.set_xticks(range(num_classes))
@@ -699,7 +699,7 @@ def visualize_f1_score(folder: str) -> None:
             values = [scores[str(d)][metric] for d in range(num_classes)]
             ax.bar(x + m_idx * width, values, width, label=metric, color=color, alpha=0.85)
 
-        ax.set_title(f"Config {config_id}\n{label}", fontsize=7)
+        ax.set_title(f"{replaceConfigWithLabel(str(config_id))}\n{label}", fontsize=7)
         ax.set_xlabel("Digit class", fontsize=8)
         ax.set_ylabel("Score", fontsize=8)
         ax.set_xticks(x + width)
@@ -737,7 +737,7 @@ def visualize_f1_tables(folder: str) -> None:
     for config_id, (label, scores, matrix) in sorted(config_data.items()):
         fig, ax = plt.subplots(figsize=(12, 4))
         test_size = sum(sum(row) for row in matrix)
-        ax.set_title(f"Config {config_id} - {label} (n={test_size:,})", fontsize=10, pad=10)
+        ax.set_title(f"{replaceConfigWithLabel(str(config_id))} - {label} (n={test_size:,})", fontsize=10, pad=10)
         ax.axis("off")
 
         col_labels   = ["Class", "TP", "FP", "FN", "TN", "Precision", "Recall", "F1"]
@@ -1105,7 +1105,7 @@ def visualize_trust_over_rounds_per_config(folder: str) -> None:
         ax = axes[idx]
         rounds, honest_avg, malicious_avg = _honest_vs_malicious_by_round(config_groups[config_id])
 
-        ax.set_title(f"Config {config_id}", fontsize=10)
+        ax.set_title(replaceConfigWithLabel(str(config_id)), fontsize=10)
         ax.set_xlabel("Round", fontsize=8)
         ax.set_ylabel("Avg trust score", fontsize=8)
         ax.set_ylim(0, 1.05)
