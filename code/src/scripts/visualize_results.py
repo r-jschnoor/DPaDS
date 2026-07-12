@@ -45,19 +45,21 @@ def make_label(filename: str) -> str:
     """
     Generate a short human-readable label from a result filename.
 
-    Extracts config-N, dp, fltrust, topk fields from the filename.
+    Extracts dp, fltrust, topk fields from the filename.
 
     Args:
         filename (str): result JSON filename.
 
     Returns:
-        str: short label e.g. 'config-1_dp-False_fltrust-True_topk-False'
+        str: short label e.g. 'dp-False_fltrust-True_topk-False'
     """
     parts  = filename.replace(".json", "").split("_")
-    keep   = ["config", "dp", "fltrust", "topk"]
+    keep   = ["dp", "fltrust", "topk"]
     labels = []
     i = 0
     while i < len(parts):
+        if parts[i].startswith("config-"):
+            labels.append(replaceConfigWithLabel(parts[i]))
         for key in keep:
             if parts[i].startswith(key):
                 # include epsilon if dp=True
@@ -77,6 +79,28 @@ def make_label(filename: str) -> str:
         i += 1
     return "_".join(labels)
 
+def replaceConfigWithLabel(config_part: str) -> str:
+    """
+    Replace 'config-X' with a more descriptive label based on the experimental grid.
+
+    Args:
+        config_part (str): part of the filename starting with 'config-'.
+
+    Returns:
+        str: descriptive label for the config.
+    """
+    config_id = config_part.replace("config-", "")
+    config_labels = {
+        "1": "BASE",
+        "2": "DP",
+        "3": "FLTrust",
+        "4": "TopK",
+        "5": "DP + FLTrust",
+        "6": "DP + TopK",
+        "7": "FLTrust + TopK",
+        "8": "ALL"
+    }
+    return config_labels.get(config_id, f"Config-{config_id}")
 
 def extract_metric(result: dict, metric: str) -> tuple[list[int], list[float]]:
     """
