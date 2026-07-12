@@ -371,17 +371,35 @@
 	
 	\paragraph{CIFAR-10.} CIFAR-10 is a benchmark dataset for object classification comprising 60,000 RGB images with a resolution of 32 × 32 pixels, categorized into 10 classes. It is divided into 50,000 training samples and 10,000 test samples and is widely used for training and benchmarking object classification networks.
 	
+	\subsection{Learning and attack settings}
+	\placeholder{review}
+	For training setups with $n$ clients, the datasets are split into $n+1$ distinct subsets, one uniformly sampled subset for the FLTrust root dataset and $n$ randomly sampled subsets for each client to train on. We assume an \ac{IID} data distribution across all clients and thus do not artificially introduce any imbalances to the label distributions. The label distribution across all subsets for the seed used in our experiments on MNIST is visualized in Figure~\ref{fig:labeldistr}.
 	
-	\subsection{Hyperparameters}
+	The label flipping attack is implemented by swapping the label assignments for the digits 3 and 7 on the MNIST dataset and TODO:CIFAR labelflip on the malicious clients and scaling the obtained gradients by the attack scale parameter before submitting them to the central server to enhance the attack influence.
 	
-	\placeholder{%
-		Justify each choice with respect to BLADES baselines.%
-	}
-	\paragraph{Static.}
-	seed, attack type
+	\subsection{Parameters}
+\placeholder{review}
+
+	\paragraph{Static.} The following parameters are constant across all experiment runs.
+
+	\begin{itemize}
+		\item The client learning rate is fixed at 0.01.
+		\item The initial seed for random processes is fixed to 42 to ensure comparability across runs. Randomizers required to vary between rounds, like training set shuffle or DP noise generation, additionally take the round number as input.
+		\item The attack type is fixed to flip specific labels: Digits 3 and 7 on the MNIST dataset and TODO: CIFAR10
+		\item \ac{DP} failure probability $\delta$ is fixed to 1e-5.
+	\end{itemize}
 	
-	\paragraph{Dynamic.}
-	Number of clients, number of rounds, byzantine fraction, root dataset size, attack scale, epsilon, top-k fraction
+	\paragraph{Dynamic.} The following parameters are varied across experiment runs to investigate their influence on the results.
+
+	\begin{itemize}
+		\item Number of clients
+		\item Number of training rounds
+		\item Byzantine fraction for label flipping attack
+		\item Attack scale for label flipping attack
+		\item Root dataset size for FLTrust
+		\item \ac{DP} budget $\varepsilon \in [1;5;10]$
+		\item Top-K sparsification threshold $k \in [1\%;10\%;50\%]$
+	\end{itemize}
 	\subsection{Software Stack}
 	
 	\begin{itemize}
@@ -430,9 +448,16 @@
 	\subsubsection{\ac{DP-SGD} Cost}
 	\placeholder{Accuracy curves for $\epsilon \in \{1,5,10\}$; privacy budget consumed.}
 	
-	\subsubsection{FLTrust Cost}
-	\placeholder{Accuracy gap and ASR for varying Byzantine fractions.}
+	\subsubsection{FLTrust}
+	\placeholder{review, ggf charts on training time??}
+
+	\paragraph{Effect.}
+	Enabling FLTrust increases model accuracy and mitigates the effect of the label-flipping attack, as shown in Figure~\ref{fig:confusion_matrices}. The flipped labels, digits 3 and 7, are consistently flipped in the predictions from the basic model and correctly predicted when enabling FLTrust. The effect increases with larger Byzantine fractions and larger attack scales. The depicted results were achieved using a Byzantine fraction of $\eta = 40\%$ and an attack scale of 2.0. 
 	
+	\paragraph{Cost.}
+	At a setting of 50 clients and 50 training rounds, applying FLTrust resulted in a wall-clock training time of 29.4\%. Smaller numbers of clients yielded a smaller percentual increase, down to no noticeable impact at 10 clients and 5 training rounds.
+	
+
 	\subsubsection{Top-$k$ Sparsification Cost}
 	\placeholder{Accuracy, bytes per round, and wall-clock time for $k \in \{1\%,10\%\}$.}
 	
@@ -552,9 +577,17 @@
 	\bibliography{bib.bib}
 	
 	\section{APPENDIX}
-	
-	\begin{figure}
-		\includegraphics{img/MNIST_07-10/label_distribution.png}
-		\label{fig:labeldistr}
+		\begin{figure}
+
+		\includegraphics[width=\linewidth]{img/MNIST_07-10/confusion_matrix_BASE}
+		\includegraphics[width=\linewidth]{img/MNIST_07-10/confusion_matrix_FLTRUST}
+		\caption{Final confusion matrices for the MNIST dataset for standard FedAvg (top) and with FLTrust enabled (bottom).}
+		\label{fig:confusion_matrices}
 	\end{figure}
+	
+	\begin{figure*}
+		\includegraphics[width=\textwidth]{img/MNIST_07-10/label_distribution.png}
+		\label{fig:labeldistr}
+		\caption{Label distribution of the root dataset used for FLTrust and the client training datasets. The root dataset was sampled uniformly across all classes, while the client datasets were sampled randomly.}
+	\end{figure*}
 \end{document}
