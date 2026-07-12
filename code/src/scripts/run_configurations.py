@@ -96,7 +96,7 @@ BASE_CONFIGS = {
 # Variants to explore
 EPSILON_VALUES = [1.0, 5.0, 10.0]
 TOPK_VALUES = [0.1, 0.5]
-RL_VALUES = [1]
+RL_VALUES = [None]
 
 
 def expand_config(base: ExperimentConfig) -> list[ExperimentConfig]:

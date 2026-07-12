@@ -1,5 +1,12 @@
 # Code Directory
 
+
+## Important findings so far
+- TrustScores: Using Batches (SGD Steps) instead of Epochs fixes the Trustscore degrading issue
+  - Using more than one SGD Step in each round increases the convergence and improves TrustScore differentiation between honest and malicious clients
+- Differential Privacy and FLTrust do not work well with each other. This is observable when comparing the results of e.g. configs 3 and 5
+
+
 ## Found Bugs
 
 Results of an in-depth correctness review of the three trilemma mechanisms (DP, FLTrust, TopK) and
