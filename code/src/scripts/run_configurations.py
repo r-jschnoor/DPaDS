@@ -29,7 +29,7 @@ DEFAULT_GPU_INDEX = 0         # None -> auto-pick the GPU with most free VRAM.
 SHARED_PARAMS = dict(
     dataset = DEFAULT_DATASET,
     num_clients = 50,
-    num_rounds = 600,
+    num_rounds = 300,
     num_byzantine = 10,
     root_dataset_size = 2000,
     rescale_to_ref_norm = False,
@@ -43,7 +43,7 @@ SHARED_PARAMS = dict(
                                    # factor for the wrapped attack variant.
     source_label = 3,             # Only used when attack_type="label_flip".
     target_label = 7,
-    num_client_iterations_per_round = None,  # Base/fallback value for non-FLTrust
+    num_client_iterations_per_round = 1,  # Base/fallback value for non-FLTrust
                                    # configs (1, 2, 4, 6), which aren't swept over
                                    # RL_VALUES below. None -> default (1 full local
                                    # epoch per round).
@@ -96,7 +96,7 @@ BASE_CONFIGS = {
 # Variants to explore
 EPSILON_VALUES = [1.0, 5.0, 10.0]
 TOPK_VALUES = [0.1, 0.5]
-RL_VALUES = [5, 10, 20]
+RL_VALUES = [1]
 
 
 def expand_config(base: ExperimentConfig) -> list[ExperimentConfig]:
