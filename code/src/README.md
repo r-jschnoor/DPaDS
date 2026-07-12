@@ -596,10 +596,70 @@ averages 0.343 vs. malicious's 0.278 -- a real, persistent gap -- but in any giv
 the ordering is unreliable (malicious trust exceeded honest trust in several individual rounds, e.g.
 rounds 5, 50, 100, 150, 350, 400). This tracks with each round's score now being based on a single
 mini-batch comparison on each side, which is inherently higher-variance than the old multi-batch
-epoch-averaged estimate. Decay (the trend problem) and separation reliability (the noise problem) are
-distinct issues -- this fix addresses the former; the latter would need a different intervention (e.g.
-smoothing trust scores over a rolling window of recent rounds rather than trusting each single round
-in isolation), not yet implemented.
+epoch-averaged estimate. Decay (the trend problem) and separation reliability (the noise problem) looked
+like distinct issues at this point -- see below for how that picture changed once the sweep was extended.
+
+### A second paper-fidelity gap: batch size
+
+While preparing a wider `Rl` sweep, noticed a second deviation from the paper's design, independent of
+the local-iteration-count one above: `get_client_fn()`'s client loaders use `batch_size=32`, but
+`load_datasets()`'s `root_loader` used `batch_size=128` (`server.py`, comment: "Larger than the client
+batch_size on purpose"). The paper's Algorithm 2 calls `ModelUpdate(w, D, b, β, R)` with the *same* `b`
+for both the client update (`g_i`) and the server update (`g_0`) -- Table I lists batch size as one
+shared system parameter, not a per-side value. Even with `num_client_iterations_per_round` matching
+step *counts*, a 128-sample server batch is a 4x smoother, lower-variance gradient estimate per step
+than a 32-sample client batch -- exactly the kind of asymmetry this investigation is about removing.
+
+Fix: added `CLIENT_BATCH_SIZE = 32` to `constants.py` (shared by both `client_fn()`'s client loaders and
+`load_datasets()`'s `root_loader`, so the two can't drift apart silently again), replacing the two
+previously-independent hardcoded values.
+
+### Extending the sweep: `Rl` in {5, 10, 20}, and resolving the batch-size question
+
+Before concluding anything from the single `Rl=1` data point above, re-ran the comparison properly:
+`Rl` in {1, 5, 10, 20} plus a fresh `None` (full local epoch) baseline, all under the *corrected* batch
+size, all same base setup (MNIST, config 3, 50 clients, 10 Byzantine, root=2000, seed=42,
+`attack_scale=2.0`). `run_configurations.py` was extended with `RL_VALUES` (swept whenever
+`use_fltrust=True`, mirroring how `EPSILON_VALUES`/`TOPK_VALUES` already sweep under `use_dp`/`use_topk`)
+so `--config 3` runs the whole sweep in one invocation. `Rl=1` and `None` were re-run individually (300
+rounds instead of 600, since there was no existing clean baseline at either value to match against
+anyway, and `Rl=5`/`Rl=10`/`Rl=20` all showed their pattern stabilize well within the first 100-150
+rounds) specifically to check whether the original `Rl=1` finding was actually caused by the batch-size
+mismatch rather than by `Rl=1` itself, since that run predated the fix above.
+
+| variant | rounds | elapsed | accuracy @ r300 | honest trust @ r300 (late-round pattern) | malicious @ r300+ |
+|---|---|---|---|---|---|
+| `None` (full epoch) | 300 | 26.2 min | **0.986** | 0.016 -- collapsed, flat near-zero from round ~100 on, no recovery | 0.000 |
+| `Rl=1` | 300 | 17.7 min | 0.782 | 0.450 (round 300) -- high but very noisy throughout | 0.325 (noisy, not reliably below honest) |
+| `Rl=5` | 600 | 35.7 min | 0.946 | 0.02-0.22 band, noisy but never collapses toward zero | 0.000 |
+| `Rl=10` | 600 | 36.8 min | 0.969 | 0.05-0.19 band, same non-collapsing pattern | 0.000 |
+| `Rl=20` | 600 | 40.1 min | 0.968 | 0.02-0.21 band, same pattern | 0.000 |
+
+**The batch-size fix was not the explanation for either original finding.** Both re-runs used the
+corrected batch size and reproduced the exact same behavior their unfixed predecessors showed: `Rl=1`
+still noisy (malicious trust actually exceeds honest at round 10: 0.125 vs 0.091; the two stay close
+together rather than cleanly separating), `None` still collapses to a near-zero floor with no recovery.
+So neither the `Rl=1` noise nor the full-epoch decay was a batch-size artifact -- both are genuine
+properties of their respective step-count regimes. `Rl=1`'s noise is best explained by a single
+mini-batch producing an inherently high-variance cosine-similarity estimate regardless of how well the
+two sides' batch sizes match; `None`'s collapse is the client-drift mechanism described above, which the
+batch-size fix was never going to touch since it operates on a completely different axis (steps per
+round, not sample count per step).
+
+**The qualitative break is sharp, not gradual.** Going into this sweep, the expectation (from the
+literature reasoning above) was that decay would gradually reappear as `Rl` increases toward a full
+epoch. That's not what happened: every tested `Rl` value, including `Rl=20` (~55% of this setup's ~36
+steps/epoch, and whose accuracy at round 600 is statistically indistinguishable from full-epoch's,
+0.987 vs 0.987), retains a self-stabilizing, non-collapsing honest trust level with malicious reliably
+crushed toward exactly zero. Only the true full-epoch case shows the severe, unrecovering decline. The
+transition from "stable" to "collapsing" looks like it happens right at the full-epoch boundary itself,
+not incrementally across the tested range.
+
+**Practical read: `Rl=10` looks like the best point tested.** It reaches 96.9% accuracy by round 300
+(vs. full-epoch's 98.6% -- a real but modest gap) while keeping the non-collapsing trust pattern and
+clean malicious suppression, without `Rl=1`'s separation noise or `Rl=20`'s slightly wider trust swings.
+Not exhaustively tuned (only 1, 5, 10, 20, and full-epoch were tested), so there may be a better point
+nearby, but `Rl=10` is a reasonable default recommendation from what's been measured so far.
 
 ### Smoke-test fallout
 

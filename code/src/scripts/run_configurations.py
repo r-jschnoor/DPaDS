@@ -29,7 +29,7 @@ DEFAULT_GPU_INDEX = 0         # None -> auto-pick the GPU with most free VRAM.
 SHARED_PARAMS = dict(
     dataset = DEFAULT_DATASET,
     num_clients = 50,
-    num_rounds = 300,
+    num_rounds = 600,
     num_byzantine = 10,
     root_dataset_size = 2000,
     rescale_to_ref_norm = False,
@@ -43,7 +43,7 @@ SHARED_PARAMS = dict(
                                    # factor for the wrapped attack variant.
     source_label = 3,             # Only used when attack_type="label_flip".
     target_label = 7,
-    num_client_iterations_per_round = 1,  # Base/fallback value for non-FLTrust
+    num_client_iterations_per_round = 10,  # Base/fallback value for non-FLTrust
                                    # configs (1, 2, 4, 6), which aren't swept over
                                    # RL_VALUES below. None -> default (1 full local
                                    # epoch per round).
@@ -94,9 +94,10 @@ BASE_CONFIGS = {
 }
 
 # Variants to explore
-EPSILON_VALUES = [1.0, 5.0, 10.0]
-TOPK_VALUES = [0.1, 0.5]
-RL_VALUES = [None]
+EPSILON_VALUES = [1.0, 10.0]    # TODO with 5.0
+TOPK_VALUES = [0.1, 0.5]        
+RL_VALUES = [10]
+NUM_CLIENTS = [10, 30, 60]      # TODO with 80/100 clients
 
 
 def expand_config(base: ExperimentConfig) -> list[ExperimentConfig]:
@@ -106,6 +107,10 @@ def expand_config(base: ExperimentConfig) -> list[ExperimentConfig]:
     Configs with DP enabled get expanded over epsilon values.
     Configs with TopK enabled get expanded over topk_ratio values.
     Configs with FLTrust enabled get expanded over RL_VALUES (num_client_iterations_per_round).
+    Every config gets expanded over NUM_CLIENTS, since client count isn't tied to a
+    specific mechanism -- num_byzantine scales with it to hold the malicious fraction
+    (base.num_byzantine / base.num_clients) constant across client counts, otherwise
+    e.g. NUM_CLIENTS=10 with a fixed num_byzantine=10 would make every client malicious.
     Expansions are combined when multiple are enabled -- for FLTrust configs that also
     have DP and/or TopK on (5, 7, 8), this multiplies the variant count accordingly.
 
@@ -118,13 +123,18 @@ def expand_config(base: ExperimentConfig) -> list[ExperimentConfig]:
     epsilons = EPSILON_VALUES if base.use_dp else [base.epsilon]
     topk_vals = TOPK_VALUES if base.use_topk else [base.topk_ratio]
     rl_vals = RL_VALUES if base.use_fltrust else [base.num_client_iterations_per_round]
+    byzantine_fraction = base.num_byzantine / base.num_clients
 
     variants = []
     for epsilon in epsilons:
         for k in topk_vals:
             for rl in rl_vals:
-                variants.append(replace(base, epsilon=epsilon, topk_ratio=k,
-                                        num_client_iterations_per_round=rl))
+                for n in NUM_CLIENTS:
+                    variants.append(replace(
+                        base, epsilon=epsilon, topk_ratio=k,
+                        num_client_iterations_per_round=rl,
+                        num_clients=n, num_byzantine=round(n * byzantine_fraction),
+                    ))
     return variants
 
 
