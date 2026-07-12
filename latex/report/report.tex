@@ -152,7 +152,7 @@
 	the global update as a weighted average of the client-local model updates.
 	
 	\subsection{Privacy: \ac{DP}}
-	This chapter introduces the concept of \ac{DP} and the Byzantine Fault Model.
+	This chapter introduces the concepts of local and central \ac{DP} and describes the implementation of local \ac{DP} in \ac{DP-SGD}.
 	
 	\subsubsection{Definition and Composition}
 
@@ -181,13 +181,13 @@
 	\end{figure}
 	
 	\subsubsection{Central vs.\ Local \ac{DP} in FL}
-	\placeholder{review}
 	
-	Central DP is applied by the server by adding noise after the aggregation. This is used in settings where the aggregator is trusted, but updates need to be masked before sharing them with third parties.
+	In central DP, the server adds noise after aggregating the client updates. This setting assumes a trusted aggregator while protecting the aggregated updates before they are shared with third parties.
 	
-	In our case, the local updates are to be protected from inference attacks by the aggregator or attackers eavesdropping on the client-server-communication, requiring local \ac{DP}. This is achieved by each client adding the noise locally before sharing the updates. The effective noise magnitude increases in this case because the masks on the individual updates add up, making local \ac{DP} more costly in terms of accuracy.
+	In the considered setting, client updates must be protected against inference attacks by the aggregator or adversaries eavesdropping on the client--server communication, requiring local \ac{DP}. To achieve this, each client adds noise to its update before transmission. Since the noise added by individual clients accumulates during aggregation, local \ac{DP} requires a higher effective noise magnitude and therefore incurs a greater loss in accuracy.
 	
 	\subsection{Robustness: Byzantine-Tolerant Aggregation}
+	This section introduces the Byzantine fault model and presents two aggregation schemes designed to mitigate the effects of Byzantine adversaries.
 	
 	\subsubsection{Byzantine Fault Model}
 	Byzantine Fault Tolerance is a property of a distributed system that allows for the system to stay operational while some components fail or act maliciously.
@@ -206,50 +206,38 @@
 	Another practical limitation especially in mobile applications is the available bandwidth to transmit local updates to the aggregator. We therefore include a method to communicate sparse instead of dense updates.
 	
 	\subsubsection{Top-$k$ Gradient Sparsification}
-\placeholder{review}
-
-	Top-$k$ gradient sparsification~\cite{aji2017topk} is a technique to reduce communication while uploading the gradients by only transmitting the $k$ largest gradient components where $k$ is a fixed fraction of the model dimension $d$.
 	
-	This naturally degrades performance depending on the information distribution within the gradients. Models that allow for precise decisions along few axes are less affected than more complex ones that rely heavily on inter-dimensional relations.
+	Top-$k$ gradient sparsification~\cite{aji2017topk} reduces communication during gradient transmission by retaining only the $k$ largest gradient components, where $k$ is a fixed fraction of the model dimension $d$.
+	
+	Discarding the remaining gradient components inevitably results in information loss, leading to reduced model performance. The extent of this degradation depends on how the optimization information is distributed across the gradient, with models relying on a small number of dominant components generally being less affected than those requiring information from many dimensions.
 	
 	\subsubsection{Relation to Model Dimensionality}
 	
-	\placeholder{%
-		The term $d/(\epsilon^2 n)$ in the theoretical lower bound~\cite{allouah2023trilemma}
-		shows efficiency is a fundamental third axis, not merely an engineering concern.%
-	}
+	The term $d/(\epsilon^2 n)$ in the theoretical lower bound~\cite{allouah2023trilemma} raises the assumption that //TODO
 	
 	\subsection{The Privacy--Robustness--Performance Trilemma}
-	
+	This section first presents the theoretical lower bound of the trilemma and then discusses its implications for empirical evaluation, motivating efficiency as a fundamental third axis.
+		
 	\subsubsection{Theoretical Lower Bound}
 	
-	\placeholder{%
-		Allouah et al.~\cite{allouah2023trilemma}: 
-		The cross-term $\eta/\epsilon^2$ shows multiplicative, not additive, interaction
-		between privacy and robustness.
-		SMEA (matches bound, exponential cost) vs.\ CAF (polynomial approximation).%
-	}
-	
-	Allouah et al.~\cite{allouah2023trilemma} showed that any algorithm guaranteeing
-	$\epsilon$-local DP and robustness against an $\eta$-fraction Byzantine adversary incurs a mean-estimation error of at least
-	$\Omega\!\left(\frac{\eta}{\epsilon^2} + \frac{d}{\epsilon^2 n} + \eta G^2\right)$.
-	
-	The cross-term $\eta/\epsilon^2$ shows that the cost for privacy and robustness interact multiplicative instead of additive.
+	Allouah et al.~\cite{allouah2023trilemma} proved that any algorithm simultaneously guaranteeing $\epsilon$-local DP and robustness against an $\eta$-fraction Byzantine adversary incurs a mean estimation error of at least
+	\begin{equation}
+	\Omega!\left(\frac{\eta}{\epsilon^2} + \frac{d}{\epsilon^2 n} + \eta G^2\right).
+	\label{lowerBoundTheory}
+	\end{equation}
+	This lower bound establishes that the costs of privacy and Byzantine robustness are fundamentally coupled. In particular, the cross-term $\eta/\epsilon^2$ shows that these costs interact multiplicatively rather than additively.
 	
 	\subsubsection{Efficiency Axis Extension}
 	
-	\placeholder{%
-		Position paper~\cite{allouah2023balancing}: extends framework to efficiency;
-		identifies theory--practice gap as open problem; calls for joint benchmarks.%
-	}
+	The same authors proposed the aggregation schemes SMEA and CAF, which match this theoretical lower bound. However, both methods incur a runtime complexity that scales cubically with the model dimension, rendering them impractical for large-scale models. Furthermore, the runtime of SMEA grows exponentially with the number of tolerated Byzantine adversaries, making it infeasible in realistic federated learning settings.
+	
+	The term $\frac{d}{\varepsilon^2 n}$ in \ref{lowerBoundTheory} further relates the model dimension $d$ to the communication cost and achievable estimation error. Consequently, maintaining accuracy for high-dimensional models requires either relaxing privacy guarantees or integrating a larger number of participating clients.
+	
 	
 	\subsubsection{Empirical Evidence of Compounding}
 	
-	\placeholder{%
-		Guerraoui et al.~\cite{guerraoui2021differentialprivacybyzantineresilience}: naive DP+Byzantine combination
-		degrades performance beyond either alone.
-		Lack of systematic 3-axis empirical mapping motivates this work.%
-	}
+	In 2021, Guerraoui et al. empirically investigated the question \textit{"Differential Privacy and Byzantine Resilience in SGD: Do They Add Up?"}~\cite{guerraoui2021differentialprivacybyzantineresilience}. They showed that a naive combination of privacy- and robustness-enhancing methods, namely \ac{DP-SGD} and Minimum-Diameter Averaging (MDA)~\cite{elmhamdi2020genuinelydistributedbyzantinemachine}, leads to unfavorable scaling with the model dimensionality and super-additive performance degradation. These findings support the theoretical results of Allouah et al. and reinforce the need to treat efficiency as a fundamental third axis in future experimental studies.
+
 	
 	% --------------------------------------------------
 	\section{Threat Model and Metrics}
@@ -306,7 +294,6 @@
 	\placeholder{%
 		Per-sample clipping norm $C$; noise multiplier $\sigma$; privacy budget
 		$\epsilon \in \{1, 5, 10\}$, $\delta = 10^{-5}$;
-		Rényi accounting via Opacus~\cite{yousefpour2021opacus}.%
 	}
 	
 	\subsection{Robustness Mechanism: FLTrust}
@@ -314,10 +301,9 @@
 	\placeholder{%
 		Server root dataset construction; trust score computation;
 		cosine similarity clipping; parameter: root dataset size;
-		implementation via BLADES~\cite{li2024blades}.%
 	}
 	
-	The root dataset for the central server was obtained by randomly sampling XX datapoints from WHERE?
+	The root dataset for the central server was obtained by randomly sampling a parametrized number of data points, uniformly distributed over all classes, from the training set.
 	
 	The trust score for weighting the local contributions is calculated as the cosine similarity to the update vector that was computed from the root data set as depicted in figure \ref{fig:fltrustupdate}.
 	\begin{figure*}[h!]
@@ -380,26 +366,22 @@
 	
 
 	\subsection{Datasets}
+
+	\paragraph{MNIST.} The MNIST dataset consists of 70,000 grayscale images of handwritten digits with a resolution of 28 × 28 pixels, each labelled with the corresponding digit in the range [0,9]. It is divided into a training set of 60,000 samples and a test set of 10,000 samples. Owing to its simplicity, the dataset is widely used to benchmark image classification models and verify their functionality before extending them to more complex datasets.
 	
-	\placeholder{%
-		MNIST: simple baseline, reproducibility check against BLADES published numbers;
-		image size, number of classes, train/test split.
-		CIFAR-10: scalability test; used in the position paper's empirical evidence
-		table~\cite{allouah2023balancing};
-		image size, number of classes, train/test split.
-		Data partitioning strategy across clients (IID / Dirichlet non-IID).%
-	}
+	\paragraph{CIFAR-10.} CIFAR-10 is a benchmark dataset for object classification comprising 60,000 RGB images with a resolution of 32 × 32 pixels, categorized into 10 classes. It is divided into 50,000 training samples and 10,000 test samples and is widely used for training and benchmarking object classification networks.
 	
-	\subsection{Fixed Hyperparameters}
+	
+	\subsection{Hyperparameters}
 	
 	\placeholder{%
 		Justify each choice with respect to BLADES baselines.%
 	}
+	\paragraph{Static.}
+	seed, attack type
 	
-	Number of clients $n$; Byzantine fraction $\eta$; number of communication
-	rounds $T$; local epochs; local batch size; learning rate;
-	model architecture (CNN for MNIST, ResNet-\placeholder{X} for CIFAR-10).
-	
+	\paragraph{Dynamic.}
+	Number of clients, number of rounds, byzantine fraction, root dataset size, attack scale, epsilon, top-k fraction
 	\subsection{Software Stack}
 	
 	\begin{itemize}
@@ -408,7 +390,6 @@
 		\item \textbf{Opacus}~\cite{yousefpour2021opacus} --- \ac{DP-SGD}, Rényi \ac{DP}
 		accounting, gradient clipping.
 		\item \textbf{FLTrust}~\cite{cao2021fltrust} --- FLTrust defense implementation.
-		\item \textbf{BLADES}~\cite{li2024blades} --- Byzantine attack implementations; PyTorch/Ray backend compatible with Flower.
 		\item \textbf{Custom} --- Top-$k$ gradient sparsification wrapper.
 	\end{itemize}
 	
@@ -528,9 +509,15 @@
 		limited $\epsilon$ grid; MNIST/CIFAR-10 may not represent medical/financial FL.%
 	}
 	
-	The experiments in this project were conducted under several simplifications to provide a lightweight anchor for future research. The datasets and models selected offer good comparability with existing work but may not fully represent the data analyzed in practical \ac{FL} applications (e.g., financial or medical domains) or complex architectures (e.g., transformer-like models). 
+	The experiments in this project were conducted under several simplifications to provide a lightweight anchor for future research. 
+	\paragraph{Simple models and datasets.}
+	The datasets and models selected offer good comparability with existing work but may not fully represent the data analyzed in practical \ac{FL} applications (e.g., financial or medical domains) or complex architectures (e.g., transformer-like models). 
 	
-	Furthermore, we evaluated only a single method and at most one attack type per axis. The baseline for membership inference attack success rate was approximated using a shadow model, and the privacy budget was constrained to a limited $\varepsilon$-grid to balance computational feasibility with analytical rigor. Additionally, the privacy budget was spent uniformly over time, but recent research by Kiani et al.~\cite{kiani2025differentiallyprivatefederatedlearning} suggests that a time-adaptive approach yields better privacy-utility-tradeoffs.
+	\paragraph{Limited method coverage.} We evaluated only a single method and at most one attack type per axis. The baseline for membership inference attack success rate was approximated using a shadow model, and the privacy budget was constrained to a limited $\varepsilon$-grid to balance computational feasibility with analytical rigor. 
+	
+	\paragraph{Privacy budget schedule.} The privacy budget was spent uniformly over time, but recent research by Kiani et al.~\cite{kiani2025differentiallyprivatefederatedlearning} suggests that a time-adaptive approach yields better privacy-utility-tradeoffs.
+	
+	\paragraph{Stateless Clients.} The clients do not preserve a state over multiple rounds. In combination with top-k sparsification, this hinders small but repeated updates to accumulate to meaningful contributions over time. Introducing a client state requires well-behaved clients to correctly maintain the state and stay synchronized with the central model, which is realistic for distributed training but not a reasonable assumption in federated learning. Another option is to share the state with the central server, defeating the purpose of the sparsification and introducing new privacy vulnerabilities.
 	
 	\subsection{Future Work}
 	
