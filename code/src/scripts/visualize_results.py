@@ -12,6 +12,20 @@ from openpyxl.styles import Alignment, Border, Font, Side
 from src.models import get_dataset_spec
 
 
+def _io_path(path: str) -> str:
+    """Return an absolute path suitable for filesystem I/O on this OS."""
+    absolute_path = os.path.abspath(path)
+    if os.name != "nt":
+        return absolute_path
+
+    if absolute_path.startswith("\\\\?\\") or len(absolute_path) < 260:
+        return absolute_path
+
+    if absolute_path.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + absolute_path[2:]
+    return "\\\\?\\" + absolute_path
+
+
 def load_results(folder: str) -> list[dict]:
     """
     Load all JSON result files from a folder.
@@ -34,7 +48,7 @@ def load_results(folder: str) -> list[dict]:
 
     results = []
     for filepath in files:
-        with open(filepath) as f:
+        with open(_io_path(filepath)) as f:
             data = json.load(f)
             data["_filename"] = os.path.basename(filepath)
             results.append(data)
@@ -200,7 +214,7 @@ def visualize_overview(folder: str) -> None:
     plt.tight_layout()
     plt.subplots_adjust(bottom=0.35)   # make room for legends below
     output_path = os.path.join(folder, "visualization.png")
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
     print(f"Saved to: {output_path}")
     plt.close()
 
@@ -267,7 +281,7 @@ def visualize_lines_per_config(folder: str) -> None:
         plt.tight_layout()
         plt.subplots_adjust(bottom=0.25)
         output_path = os.path.join(folder, subfolder_name, f"line_chart_config_{config_id}.png")
-        plt.savefig(output_path, dpi=150, bbox_inches="tight")
+        plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
         print(f"Saved to: {output_path}")
         plt.close()
 
@@ -401,7 +415,130 @@ def visualize_bar_chart_per_config(folder: str) -> None:
             fontsize=8, transform=ax.transAxes)
 
     output_path = os.path.join(folder, "bar_accuracy.png")
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
+    print(f"Saved to: {output_path}")
+    plt.close()
+
+
+def _avg_seconds_per_round(result: dict) -> float | None:
+    """
+    Average wall-clock duration per round (s) for a single run.
+
+    Mirrors the "Avg s/round" figure in the Excel "Elapsed Time" sheet
+    (see _write_elapsed_time_sheet()): elapsed_seconds / num_rounds, since
+    a run only records total wall-clock time, not a per-round breakdown.
+
+    Args:
+        result (dict): loaded result JSON.
+
+    Returns:
+        float | None: seconds per round, or None if elapsed_seconds/num_rounds
+                      is missing.
+    """
+    elapsed = result["results"].get("elapsed_seconds")
+    num_rounds = result["config"]["num_rounds"]
+    if elapsed is None or not num_rounds:
+        return None
+    return elapsed / num_rounds
+
+
+def visualize_duration_per_config(folder: str) -> None:
+    """
+    Avg wall-clock duration per round (s) vs. number of clients, one
+    subplot per config family, one line per variant within that config
+    (e.g. DP's two epsilon values, or DP+TopK's four epsilon x topk
+    combos) -- so a variant's line spans all three client counts (10, 30, 60).
+
+    Faceted per config rather than one combined chart: pooling every
+    variant across all 8 configs would put ~18 lines on a single axis
+    (config x epsilon x topk combos), which is too cluttered to read.
+
+    Args:
+        folder (str): path to folder containing result JSON files.
+    """
+    results = load_results(folder)
+
+    config_groups = defaultdict(list)
+    for result in results:
+        config_groups[result["config"]["config_id"]].append(result)
+
+    # Group each config's variants by their non-client-count parameters
+    # (epsilon / topk_ratio) so each swept-parameter combo becomes its own
+    # line across client counts, rather than one line per result. Built
+    # up front (rather than per-subplot) so the global max duration below
+    # can be computed before any axis is drawn.
+    config_series = {}
+    global_max = 0.0
+    for config_id, group_results in config_groups.items():
+        series = defaultdict(list)
+        for result in group_results:
+            config = result["config"]
+            series_key = (
+                config.get("epsilon") if config.get("use_dp") else None,
+                config.get("topk_ratio") if config.get("use_topk") else None,
+            )
+            series[series_key].append(result)
+
+        lines = {}
+        for series_key, variants in series.items():
+            variants = sorted(variants, key=lambda r: r["config"]["num_clients"])
+            clients, durations = [], []
+            for result in variants:
+                duration = _avg_seconds_per_round(result)
+                if duration is None:
+                    continue
+                clients.append(result["config"]["num_clients"])
+                durations.append(duration)
+            if durations:
+                lines[series_key] = (clients, durations)
+                global_max = max(global_max, max(durations))
+        config_series[config_id] = lines
+
+    # Shared ceiling for every subplot's y-axis (with a little headroom) so
+    # bar heights/slopes are visually comparable across configs.
+    shared_ylim = global_max * 1.1 if global_max > 0 else 1.0
+
+    config_ids = sorted(config_groups.keys())
+    cols = min(4, len(config_ids))
+    rows = (len(config_ids) + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 4.5, rows * 4), squeeze=False)
+    fig.suptitle("Avg Duration per Round vs. Number of Clients, per Config", fontsize=14)
+    axes = axes.flatten()
+
+    for idx, config_id in enumerate(config_ids):
+        ax = axes[idx]
+        ax.set_title(replace_config_with_label(str(config_id)), fontsize=10)
+        ax.set_xlabel("Clients", fontsize=8)
+        ax.set_ylabel("Avg s/round", fontsize=8)
+        ax.set_ylim(0, shared_ylim)
+        ax.grid(True, alpha=0.3)
+
+        any_plotted = False
+        for series_key in sorted(config_series[config_id], key=lambda k: (k[0] or 0.0, k[1] or 0.0)):
+            clients, durations = config_series[config_id][series_key]
+            epsilon, topk_ratio = series_key
+            label_parts = []
+            if epsilon is not None:
+                label_parts.append(f"epsilon={epsilon}")
+            if topk_ratio is not None:
+                label_parts.append(f"k={topk_ratio}")
+            label = ", ".join(label_parts) if label_parts else "default"
+
+            ax.plot(clients, durations, marker="o", label=label)
+            any_plotted = True
+
+        if any_plotted:
+            ax.legend(fontsize=7, loc="best")
+        else:
+            ax.text(0.5, 0.5, "No data", ha="center", va="center",
+                    transform=ax.transAxes, color="gray", fontsize=9)
+
+    for idx in range(len(config_ids), len(axes)):
+        axes[idx].set_visible(False)
+
+    plt.tight_layout()
+    output_path = os.path.join(folder, "duration_per_config.png")
+    plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
     print(f"Saved to: {output_path}")
     plt.close()
 
@@ -644,7 +781,7 @@ def export_excel_report(folder: str) -> None:
     _write_elapsed_time_sheet(elapsed_ws, groups, show_rl_row)
 
     output_path = os.path.join(folder, "accuracy_by_round.xlsx")
-    wb.save(output_path)
+    wb.save(_io_path(output_path))
     print(f"Saved to: {output_path}")
 
 
@@ -771,7 +908,7 @@ def visualize_radar_chart(folder: str) -> None:
 
     plt.tight_layout()
     output_path = os.path.join(folder, "radar_trilemma.png")
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
     print(f"Saved to: {output_path}")
     plt.close()
 
@@ -865,7 +1002,7 @@ def visualize_radar_chart_per_config(folder: str) -> None:
 
     plt.tight_layout()
     output_path = os.path.join(folder, "radar_per_config.png")
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
     print(f"Saved to: {output_path}")
     plt.close()
 
@@ -880,6 +1017,7 @@ def visualize_confusion_matrices(folder: str) -> None:
     results = load_results(folder)
 
     # Group by config_id, pick variant with best final accuracy
+    #//TODO können wir hier alle plotten?
     config_matrices = group_by_config_id(results)
 
     num_configs = len(config_matrices)
@@ -928,7 +1066,7 @@ def visualize_confusion_matrices(folder: str) -> None:
 
     plt.tight_layout()
     output_path = os.path.join(folder, "confusion_matrices.png")
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
     print(f"Saved to: {output_path}")
     plt.close()
 
@@ -984,7 +1122,7 @@ def visualize_f1_score(folder: str) -> None:
 
     plt.tight_layout()
     output_path = os.path.join(folder, "f1_charts.png")
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
     print(f"Saved to: {output_path}")
     plt.close()
 
@@ -1095,7 +1233,7 @@ def visualize_f1_tables(folder: str) -> None:
 
         plt.tight_layout()
         output_path = os.path.join(folder, "f1_tables", f"f1_table_config_{config_id}.png")
-        plt.savefig(output_path, dpi=150, bbox_inches="tight")
+        plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
         print(f"Saved to: {output_path}")
         plt.close()
 
@@ -1192,7 +1330,7 @@ def visualize_label_distribution(folder: str) -> None:
 
     plt.tight_layout()
     output_path = os.path.join(folder, "label_distribution", "label_distribution.png")
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
     print(f"Saved to: {output_path}")
     plt.close()
 
@@ -1285,7 +1423,7 @@ def visualize_trust_per_client(folder: str) -> None:
 
     plt.tight_layout()
     output_path = os.path.join(folder, "trust_per_client.png")
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
     print(f"Saved to: {output_path}")
     plt.close()
 
@@ -1347,7 +1485,7 @@ def visualize_trust_over_rounds(folder: str) -> None:
 
     plt.tight_layout()
     output_path = os.path.join(folder, "trust_over_rounds.png")
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
     print(f"Saved to: {output_path}")
     plt.close()
 
@@ -1400,7 +1538,7 @@ def visualize_trust_over_rounds_per_config(folder: str) -> None:
 
     plt.tight_layout()
     output_path = os.path.join(folder, "trust_over_rounds_per_config.png")
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
     print(f"Saved to: {output_path}")
     plt.close()
 
@@ -1418,7 +1556,8 @@ if __name__ == "__main__":
     parser.add_argument("--plot", type=str,
                         choices=["all", "lines", "bar", "radar", "radar_per_conf", "lines_per_conf",
                                  "confusion", "f1_chart", "f1_table_per_conf", "label_dist",
-                                 "trust_per_client", "trust_rounds", "trust_rounds_per_conf", "excel"],
+                                 "trust_per_client", "trust_rounds", "trust_rounds_per_conf", "excel",
+                                 "duration_per_conf"],
                         default="all",
                         help="which plot to generate (default: all)")
     args = parser.parse_args(args=None if len(sys.argv) > 1 else ["--help"])
@@ -1449,3 +1588,5 @@ if __name__ == "__main__":
         visualize_trust_over_rounds_per_config(args.folder)
     if args.plot in ("all", "excel"):
         export_excel_report(args.folder)
+    if args.plot in ("all", "duration_per_conf"):
+        visualize_duration_per_config(args.folder)
