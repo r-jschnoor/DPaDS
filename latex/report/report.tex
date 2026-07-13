@@ -255,7 +255,7 @@
 	
 	\paragraph{Robustness.}
 	
-	Robustness is evaluated by the attack success rate (ASR) under label-flipping attacks and the accuracy gap $\Delta_{acc}$ relative to a clean FedAvg baseline. The accuracy gap captures untargeted performance degradation caused by adversarial clients, providing a measure of resilience to Byzantine behavior.
+	Robustness is evaluated by the the accuracy gap $\Delta_{acc}$ relative to a clean FedAvg baseline. The accuracy gap captures performance degradation caused by adversarial clients, providing a measure of resilience to Byzantine behavior.
 	
 	\paragraph{Performance.}
 
@@ -367,10 +367,11 @@
 	\paragraph{CIFAR-10.} CIFAR-10 is a benchmark dataset for object classification comprising 60,000 RGB images with a resolution of 32 × 32 pixels, categorized into 10 classes. It is divided into 50,000 training samples and 10,000 test samples and is widely used for training and benchmarking object classification networks.
 	
 	\subsection{Learning and attack settings}
-	\placeholder{review}
-	For training setups with $n$ clients, the datasets are split into $n+1$ distinct subsets, one uniformly sampled subset for the FLTrust root dataset and $n$ randomly sampled subsets for each client to train on. We assume an \ac{IID} data distribution across all clients and thus do not artificially introduce any imbalances to the label distributions. The label distribution across all subsets for the seed used in our experiments on MNIST is visualized in Figure~\ref{fig:labeldistr}.
+
+	For a training setup with $n$ clients, the dataset is partitioned into $n+1$ disjoint subsets: one uniformly sampled root dataset for FLTrust and $n$ randomly sampled client datasets. We assume an \ac{IID} data distribution across all clients and therefore do not introduce artificial label imbalances. The resulting label distribution for the MNIST experiments is shown in Figure~\ref{fig:labeldistr}.
 	
-	The label flipping attack is implemented by swapping the label assignments for the digits 3 and 7 on the MNIST dataset and TODO:CIFAR labelflip on the malicious clients and scaling the obtained gradients by the attack scale parameter before submitting them to the central server to enhance the attack influence.
+	The label-flipping attack is implemented by swapping the labels of the digits "3" and "7" in the MNIST dataset and the classes "cats" and "dogs" in the CIFAR-10 dataset for the malicious clients. The resulting gradients are subsequently scaled by the attack scale parameter before being transmitted to the central server to amplify the attack.
+
 	
 	\subsection{Parameters}
 \placeholder{review}
