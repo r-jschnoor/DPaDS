@@ -4,6 +4,7 @@
 ## Important findings so far
 - TrustScores: Using Batches (SGD Steps) instead of Epochs fixes the Trustscore degrading issue
   - Using more than one SGD Step in each round increases the convergence and improves TrustScore differentiation between honest and malicious clients
+- Batchsize of server and client should be the same, as well as SGD steps
 - Differential Privacy and FLTrust do not work well with each other. This is observable when comparing the results of e.g. configs 3 and 5
 
 
@@ -270,6 +271,37 @@ seed) against published numbers for each mechanism, after ruling out a code bug:
     rounds each, 4/4 unique node_ids in every round (zero collisions), versus a reproduced collision
     on the old code before the fix.
     **Status: Fixed.**
+
+15. FW -> **TopK doesn't reduce actual bytes transmitted in the simulation** -- `client.py`
+    (`MnistClient.fit()`), `mechanisms/attacks.py` (`LabelFlipClient.fit()`,
+    `RandomGradientClient.fit()`). After `topk_sparsify()` zeroes out all but the top-k delta
+    entries, `fit()` reconstructs a full dense parameter vector
+    (`sparse_parameters = flat_before + sparsified_update`) before returning it -- the same length
+    as an uncompressed update. Ray genuinely serializes this dense array between the client and
+    server Ray actors, so a TopK config transmits exactly as many bytes as an uncompressed one
+    today; only the *values* at the zeroed positions look unchanged, nothing is actually smaller.
+    The new `update_bytes` metric (see "New metric" below) and the pre-existing `topk_sparsity` are
+    both computed/logical numbers -- what a real sparse encoding would cost -- not a measurement of
+    what Ray moved.
+    Real compression would require `fit()` to return a compact `(indices, values)` pair instead of
+    dense per-layer arrays, plus: a dedicated `TopKFedAvg` strategy for the non-FLTrust TopK configs
+    (4, 6), since plain `FedAvg.aggregate_fit()` assumes homogeneous per-layer-shaped arrays and
+    can't combine sparse updates from clients that touched different positions; rewriting
+    `FLTrustStrategy.aggregate_fit()` (`mechanisms/robust_aggregation.py`) to decode each client's
+    sparse pair into a dense delta before its existing flatten/cosine-similarity math, and to get
+    layer shapes from `dataset_spec` instead of inferring them from a client's (now sparse) result
+    (currently done at the `original_parameters = parameters_to_ndarrays(first_fit_result.parameters)`
+    line); and accepting that only the uplink (client -> server) can ever compress this way -- the
+    downlink broadcast each round stays fully dense regardless, since clients need the complete
+    current model to train locally, and the aggregate touches enough distinct positions across many
+    clients to be effectively dense too.
+    Deliberately not attempted here: this rewrites the core aggregation math path in exactly the
+    files this document already flags as fragile (the DP-sync ordering bug, bug 1's dropped-base-model
+    bug), so it needs its own dedicated review/testing pass rather than being folded into an
+    unrelated metrics-only change.
+    **Status: Won't fix (for now).** Flagged as **future work** -- implementing genuine sparse-wire
+    compression (not just logically computing what it would cost) is the natural follow-up once
+    this is worth the regression risk.
 
 ## Seed control
 
@@ -678,3 +710,135 @@ a ~106K-dim space have near-zero cosine similarity by construction, so the test'
 score just as low as its "malicious" one (confirmed this also happens on the original code, so it
 predates this session). Flagged, not fixed -- the real fix would derive the fake honest updates from
 `strategy.ref_model`'s actual parameters instead of a separate model instance.
+
+## `TODO.md` "What to do next": bar sort order, Excel export, communication-size metric
+
+Addressed the three items `TODO.md` listed under "What to do next".
+
+**1. `bar_accuracy` bar order.** `visualize_bar_chart_per_config()` (`scripts/visualize_results.py`)
+sorted each config's variants by `r["_filename"]` (string sort), which only happened to look right by
+coincidence -- e.g. an epsilon of `5.0` would sort *after* `10.0`, since `"5" > "1"` lexicographically.
+Fix: `variant_sort_key()` sorts on the actual numeric config fields instead
+(`topk_ratio, epsilon, num_client_iterations_per_round, num_clients`, outermost to innermost).
+
+**2. Excel export.** New `export_accuracy_tables_excel()` (`scripts/visualize_results.py`, `--plot
+excel`, included in `--plot all`), writing `accuracy_by_round.xlsx`. Reproduces the hand-built layout
+in `tmp/template_excel_output.xlsx`: one bordered table per config, placed side by side left to right,
+each with a bold title (`replace_config_with_label()`), `Clients`/`Epsilon`/`TopK` rows giving that
+column's value for whichever mechanisms this config actually has on (`"-"` for an inactive one, e.g.
+`Epsilon` when `use_dp=False` -- not omitted, so every table's rows line up across the sheet), a
+`Round`/`Accuracy` header row, and one data row per round. An `Rl` row (`num_client_iterations_per_round`)
+is inserted between `Epsilon` and `TopK` only if at least one result in the folder actually has it set,
+so a folder where nothing used it doesn't get a meaningless all-`"-"` row. Needed adding `openpyxl` to
+`pyproject.toml` (`pandas` was already a dependency, but its `.xlsx` writer needs an engine).
+
+**3. `update_bytes` metric.** New `update_size_bytes()` (`mechanisms/topk.py`), called from
+`MnistClient.fit()` (`client.py`) and both attack `fit()` overrides (`mechanisms/attacks.py`), in both
+the TopK and non-TopK branches, so every client reports it every round. For non-TopK configs this is
+the real, actual cost -- the dense vector is genuinely what's serialized across the client/server
+boundary today. For TopK configs it's a logical/computed number instead, **not** a measurement of
+what actually crosses the wire in this simulation right now -- fit() still returns a dense array
+regardless of topk_ratio (see item 15 above, Won't-fix / future work, for why), so a TopK config's
+*real* current bytes-on-wire equals the dense case, unaffected by topk_ratio; what's reported here is
+what a real sparse encoding *would* cost once that's implemented. Two
+modeling choices, decided with the user: (a) a TopK-sparsified entry costs `value + 4-byte index`
+(8 bytes for a float32 update), not just the raw value, since the receiver can't place a value
+without knowing which position it belongs to -- reporting value-only would overstate TopK's real
+compression benefit; (b) the per-round value is a **total** across all clients (summed), not a
+per-client average like every other fit metric -- `weighted_average_metrics()` (`server.py`) now
+excludes `"update_bytes"` from its generic averaging, and `HistoryStrategyAdapter.aggregate_fit()`
+sums it directly from `results` instead (same pattern already used there for the per-client
+`malicious_<id>` metrics). `run_configurations.py::save_results()` now writes it into each round's
+entry in the result JSON, alongside `loss`/`accuracy`/`epsilon`.
+
+**Found while testing, not a regression from this work**: `MnistClient.get_parameters()`
+(`client.py`) returns `.cpu().numpy()` on each parameter tensor -- on CPU (every MNIST run, and any
+CIFAR-10 run's client-side reads before a GPU round-trip), `.cpu()` is a no-op and `.numpy()` returns
+a view sharing memory with the live `nn.Module` parameter, not a copy. Reproduced directly: capturing
+`parameters = client.get_parameters(...)` and later calling `client.fit(parameters, ...)` on the
+*same* client object silently corrupts the "before training" snapshot mid-`fit()`, since the
+in-place `optimizer.step()` mutates that same backing memory -- `topk_sparsity`/`update_bytes` came
+out as exactly `0.0` until the test was fixed to pass in an explicit `.copy()`. Confirmed this cannot
+affect any real run in this codebase: Flower's simulation runs each client in its own Ray worker
+*process* (not just a thread, per "Seed control" above), so parameters are always serialized across
+that process boundary before a client sees them -- there is no in-process aliasing between a client's
+own `get_parameters()` output and the `parameters` argument its own `fit()` receives. Purely a hazard
+for same-process test code (like the one that surfaced it) or a future single-process refactor.
+**Status: Not fixed** -- out of scope for a metrics-only change, and doesn't affect any existing or
+future result as long as clients stay in separate processes.
+
+## `TODO.md` "What to do next": trust plots restricted to non-DP FLTrust, trilemma axis TODOs
+
+**1. Trust plots now exclude DP+FLTrust configs.** `visualize_trust_per_client()`,
+`visualize_trust_over_rounds()`, and `visualize_trust_over_rounds_per_config()`
+(`scripts/visualize_results.py`) all filtered to `use_fltrust` only, which included the DP+FLTrust
+configs (5, 8) alongside plain FLTrust ones (3, 7). Per the earlier trust-score investigation above
+("Differential Privacy and FLTrust do not work well with each other"), DP noise degrades the
+cosine-similarity trust signal enough that mixing DP+FLTrust variants into these plots muddies the
+honest-vs-malicious separation they're meant to show. Fix: all three now filter to `use_fltrust and
+not use_dp`. Note this changes `visualize_trust_over_rounds_per_config()`'s scope specifically -- its
+docstring used to say its per-config subplot split existed "so DP/TopK's effect on trust isn't
+averaged away against plain-FLTrust configs"; with DP+FLTrust excluded, it now only compares TopK's
+effect (configs 3 vs 7), not DP's, since there's no DP+FLTrust subplot left to compare against.
+Docstring updated to reflect this. Verified against a real result folder (24 files, all 8 configs):
+the filtered results only contain config_ids {3, 7}, as expected.
+
+**2. Trilemma triangle axis calculations -- decided, not yet implemented.** Current formulas
+(`get_base_accuracy_and_max_epsilon()` + `visualize_radar_chart()`/`visualize_radar_chart_per_config()`,
+`scripts/visualize_results.py`) have three known weaknesses, discussed with the user; the fixes below
+are agreed but deliberately not implemented yet (do this as a dedicated follow-up, not bundled in):
+
+- **Robustness** (currently `= final_accuracy`, unnormalized) -> switch to relative-to-clean-baseline:
+  `robustness = (final_accuracy - base_accuracy) / (clean_accuracy - base_accuracy)`, where
+  `base_accuracy` is config 1's accuracy *under* the same attack (already computed by
+  `get_base_accuracy_and_max_epsilon()`, but currently discarded -- both radar functions call it as
+  `_, max_epsilon = get_base_accuracy_and_max_epsilon(results)`) and `clean_accuracy` is config 1's
+  accuracy with **no attack at all**. This properly isolates attack-resistance from raw accuracy,
+  matching the function's own docstring, which already describes this exact comparison
+  ("Performance (final_accuracy_no_attack baseline comparison)") but never implemented it.
+  **Blocked on**: `clean_accuracy` needs a no-attack BASE-config run, which doesn't exist yet --
+  `TODO.md`'s "Upcoming runs" already lists this ("Run ohne attack mit BASE config"), so this becomes
+  implementable once that run exists.
+- **Privacy** (currently `= max(1 - epsilon/max_epsilon, 0)`, where `max_epsilon` is the largest
+  epsilon found in the *current results folder*) -> **left as-is for now**. Known issue: the
+  folder-relative denominator means the same run can score very differently depending on what other
+  epsilon values happen to be bundled into the same folder, so radar charts from different folders
+  aren't on a comparable scale. Discussed fixing this with a fixed project-wide epsilon ceiling
+  (linear or log-scaled), but decided to defer -- revisit alongside the Robustness fix once that's
+  underway, rather than as an isolated change.
+- **Efficiency** (currently `= 1 - topk_ratio` when `use_topk`, else `0`) -> switch to using the
+  `update_bytes` metric: `efficiency = 1 - (update_bytes / dense_reference_bytes)`, where
+  `dense_reference_bytes` is the same model's dense parameter count * dtype size (a fixed constant
+  per dataset, not folder-relative). More accurate than `1 - topk_ratio`, which ignores the
+  per-entry index overhead `update_bytes` already accounts for (`1 - topk_ratio` overstates TopK's
+  benefit by roughly 2x relative to what `update_bytes` reports for the same config, since a kept
+  entry costs `value + index`, not just `value`). **Caveat carried over from the `update_bytes`
+  metric itself** (see the "communication-size metric" entry above): for TopK configs, `update_bytes`
+  is currently the *hypothetical* cost if real sparse-wire compression were implemented, not what's
+  actually transmitted in this simulation today (still a dense array either way, see item 15).
+  Switching Efficiency to use it means this axis would represent TopK's *potential* efficiency, not
+  its current actual efficiency (which is 0% today, matching item 15's finding) -- worth labeling the
+  axis clearly (e.g. in a legend/caption) once implemented, so it isn't read as a present-tense claim.
+
+## `TODO.md` "What to do next": elapsed-time Excel sheet
+
+Added an "Elapsed Time" sheet to the Excel report (`scripts/visualize_results.py`), alongside the
+existing "Accuracy by Round" sheet -- same file (`accuracy_by_round.xlsx`), two tabs, both built by
+the renamed entry point `export_excel_report()` (was `export_accuracy_tables_excel()`). Per-config
+tables reuse the same title/`Clients`/`Epsilon`/`Rl`/`TopK` header block and border styling as the
+accuracy sheet, but instead of a `Round`/`Accuracy` header row + one row per round, each variant gets
+two summary rows: `Avg s/round` (`elapsed_seconds / num_rounds`) and `Total elapsed (s)`
+(`elapsed_seconds` as-is), both already present in every result JSON's `results.elapsed_seconds`
+field (`run_configurations.py::save_results()`) -- no new data collection needed, purely a new export.
+
+Extracted the shared scaffold (title, `Clients`/`Epsilon`/`Rl`/`TopK` rows, and the borders down
+through `TopK`'s double-bottom separator) into `_write_config_param_block()`, called by both
+`_write_accuracy_sheet()` and the new `_write_elapsed_time_sheet()` -- addresses `TODO.md`'s
+long-standing "Refactor redundancy" bullet for this specific duplication, since a second near-copy of
+the whole scaffold would otherwise have been needed. Each sheet-builder finishes its own box/divider
+border below the block (medium outer box, thin label-column divider), since the two sheets have a
+different number of data rows below `TopK` (accuracy: header row + `num_rounds` rows; elapsed time:
+always exactly 2 summary rows) and only the caller knows its own final row once it's written them.
+Verified against a real result folder (24 files, all 8 configs): both sheets render with matching
+header blocks and correct borders, `Avg s/round` values divide out consistently with `Total elapsed
+(s)` and each variant's `num_rounds`.

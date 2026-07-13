@@ -157,7 +157,12 @@ class HistoryStrategyAdapter:
             for _, fit_result in results
             if "client_id" in fit_result.metrics
         }
-        metrics = {**(metrics or {}), **malicious_metrics}
+        # Total communication volume this round -> summed, not weighted-averaged like every
+        # other fit metric (weighted_average_metrics() excludes "update_bytes" from its own
+        # averaging for exactly this reason), since a per-client average would understate how
+        # much data actually crossed the wire in aggregate this round.
+        total_update_bytes = sum(fit_result.metrics.get("update_bytes", 0) for _, fit_result in results)
+        metrics = {**(metrics or {}), **malicious_metrics, "update_bytes": total_update_bytes}
 
         if metrics:
             for key, val in metrics.items():
@@ -576,7 +581,8 @@ def weighted_average_metrics(metrics):
     common_keys = set(metrics[0][1].keys())
     for _, metric in metrics[1:]:
         common_keys &= set(metric.keys())
-    common_keys -= {"client_id"}  # per-client identifier, not meant to be averaged
+    common_keys -= {"client_id"}     # per-client identifier, not meant to be averaged
+    common_keys -= {"update_bytes"}  # summed (total per-round communication), not averaged -- see HistoryStrategyAdapter.aggregate_fit()
 
     for key in common_keys:
         # Need to skip non-numeric metrics like accountant_state
