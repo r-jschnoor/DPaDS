@@ -7,7 +7,7 @@ import flwr as fl
 import warnings
 
 from src.constants import ACCURACY_KEY
-from src.mechanisms.topk import topk_sparsify
+from src.mechanisms.topk import topk_sparsify, update_size_bytes
 from src.models import get_dataset_spec
 from src.mechanisms.dp import compute_noise_multiplier, make_private, get_privacy_spent, make_private_with_noise_multiplier, restore_accountant_state, serialize_accountant_state
 
@@ -230,6 +230,9 @@ class MnistClient(fl.client.NumPyClient):
 
             sparsity = np.count_nonzero(sparsified_update) / len(sparsified_update)
             metrics["topk_sparsity"] = sparsity
+            metrics["update_bytes"] = update_size_bytes(updated_parameters, use_topk=True, sparsified_update=sparsified_update)
+        else:
+            metrics["update_bytes"] = update_size_bytes(updated_parameters, use_topk=False)
 
 
         if self.use_dp and self.privacy_engine is not None:

@@ -3,7 +3,7 @@ import torch
 
 from src.client import MnistClient, set_seed, iterate_batches
 from src.mechanisms.dp import get_privacy_spent, make_private_with_noise_multiplier, restore_accountant_state, serialize_accountant_state
-from src.mechanisms.topk import topk_sparsify, unflatten
+from src.mechanisms.topk import topk_sparsify, unflatten, update_size_bytes
 from src.models import get_dataset_spec
 from src.models.mnist_cnn import MnistCNN
 
@@ -128,6 +128,9 @@ class LabelFlipClient(MnistClient):
                 updated_parameters.append(sparse_params[index:index+size].reshape(shape))
                 index += size
             metrics["topk_sparsity"] = np.count_nonzero(sparse_update) / len(sparse_update)
+            metrics["update_bytes"] = update_size_bytes(updated_parameters, use_topk=True, sparsified_update=sparse_update)
+        else:
+            metrics["update_bytes"] = update_size_bytes(updated_parameters, use_topk=False)
 
         if self.use_dp and self.privacy_engine is not None:
             metrics["epsilon"]           = get_privacy_spent(self.privacy_engine, self.delta)
@@ -232,6 +235,9 @@ class RandomGradientClient(MnistClient):
             # Sparsify the noise itself, same as an honest client sparsifies its real update
             noise = topk_sparsify(noise, self.topk_ratio)
             metrics["topk_sparsity"] = np.count_nonzero(noise) / len(noise)
+            metrics["update_bytes"] = update_size_bytes(parameters, use_topk=True, sparsified_update=noise)
+        else:
+            metrics["update_bytes"] = update_size_bytes(parameters, use_topk=False)
 
         shapes = [p.shape for p in parameters]
         updated_parameters = unflatten(flat_before + noise, shapes)

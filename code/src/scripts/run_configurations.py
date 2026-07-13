@@ -29,7 +29,7 @@ DEFAULT_GPU_INDEX = 0         # None -> auto-pick the GPU with most free VRAM.
 SHARED_PARAMS = dict(
     dataset = DEFAULT_DATASET,
     num_clients = 50,
-    num_rounds = 600,
+    num_rounds = 500,
     num_byzantine = 10,
     root_dataset_size = 2000,
     rescale_to_ref_norm = False,
@@ -94,10 +94,10 @@ BASE_CONFIGS = {
 }
 
 # Variants to explore
-EPSILON_VALUES = [1.0, 10.0]    # TODO with 5.0
-TOPK_VALUES = [0.1, 0.5]        
+EPSILON_VALUES = [1.0, 10.0]    
+TOPK_VALUES = [0.1, 0.5]        # TODO with 0.01
 RL_VALUES = [10]
-NUM_CLIENTS = [10, 30, 60]      # TODO with 80/100 clients
+NUM_CLIENTS = [10, 30, 60, 80, 100]
 
 
 def expand_config(base: ExperimentConfig) -> list[ExperimentConfig]:
@@ -260,9 +260,10 @@ def save_results(config: ExperimentConfig, history,
     filepath = os.path.join(folder, filename)
 
     # Extract per-round metrics from history
-    losses     = dict(history["losses_distributed"])
-    accuracies = dict(history["metrics_distributed_evaluate"].get("accuracy", []))
-    epsilons   = dict(history["metrics_distributed_fit"].get("epsilon", []))
+    losses       = dict(history["losses_distributed"])
+    accuracies   = dict(history["metrics_distributed_evaluate"].get("accuracy", []))
+    epsilons     = dict(history["metrics_distributed_fit"].get("epsilon", []))
+    update_bytes = dict(history["metrics_distributed_fit"].get("update_bytes", []))  # summed across clients per round, see HistoryStrategyAdapter.aggregate_fit()
 
     # FLTrust reports one trust_score_<client_id> metric per client per round
     # -> regroup into {round: {client_id: score}} for the results file.
@@ -321,6 +322,7 @@ def save_results(config: ExperimentConfig, history,
                     "loss": losses.get(r),
                     "accuracy": accuracies.get(r),
                     "epsilon": epsilons.get(r),
+                    "update_bytes": update_bytes.get(r),
                     "trust_scores": trust_scores_by_round.get(r, {}),
                 }
                 for r in range(1, config.num_rounds + 1)
@@ -375,9 +377,11 @@ Available configs:
   8  All three    dp=on   fltrust=on   topk=on    (runs e=1,5,10 x k=1%,10%)
 
 Usage:
-  python scripts/run_grid.py --config 1    run config 1 (baseline)
-  python scripts/run_grid.py --config 2    run config 2 (all epsilon variants)
-  python scripts/run_grid.py --all         run all configs sequentially
+  python scripts/run_grid.py --config 1              run config 1 (baseline)
+  python scripts/run_grid.py --config 2              run config 2 (all epsilon variants)
+  python scripts/run_grid.py --all                   run all configs sequentially
+  python scripts/run_grid.py --config 1 --no-attack   run config 1 with num_byzantine forced
+                                                       to 0 (clean/no-attack baseline)
 
 Results saved to: results/<timestamp>_<params>.json
 """
@@ -404,6 +408,10 @@ if __name__ == "__main__":
                         help="manually claim physical GPU index N for this whole run "
                              "(dataset=cifar10 only; default: auto-pick the GPU with most "
                              "free VRAM)")
+    parser.add_argument("--no-attack", action="store_true",
+                        help="force num_byzantine=0 for every config run this invocation, "
+                             "disabling the Byzantine attack entirely (e.g. for a clean "
+                             "baseline run), without touching SHARED_PARAMS")
     args = parser.parse_args(args=None if len(sys.argv) > 1 else ["--help"])
 
     if args.all:
@@ -411,6 +419,9 @@ if __name__ == "__main__":
                           for c in expand_config(base)]
     else:
         configs_to_run = expand_config(BASE_CONFIGS[args.config])
+
+    if args.no_attack:
+        configs_to_run = [replace(config, num_byzantine=0) for config in configs_to_run]
 
     # Cap Cpu Core usage
     num_cpus_to_use = args.max_cpus

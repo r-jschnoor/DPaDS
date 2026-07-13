@@ -6,6 +6,8 @@ import sys
 import glob
 import matplotlib.pyplot as plt
 import numpy as np
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, Side
 
 from src.models import get_dataset_spec
 
@@ -59,7 +61,7 @@ def make_label(filename: str) -> str:
     i = 0
     while i < len(parts):
         if parts[i].startswith("config-"):
-            labels.append(replaceConfigWithLabel(parts[i]))
+            labels.append(replace_config_with_label(parts[i]))
         for key in keep:
             if parts[i].startswith(key):
                 # include epsilon if dp=True
@@ -79,7 +81,7 @@ def make_label(filename: str) -> str:
         i += 1
     return "_".join(labels)
 
-def replaceConfigWithLabel(config_part: str) -> str:
+def replace_config_with_label(config_part: str) -> str:
     """
     Replace 'config-X' with a more descriptive label based on the experimental grid.
 
@@ -101,6 +103,33 @@ def replaceConfigWithLabel(config_part: str) -> str:
         "8": "ALL"
     }
     return config_labels.get(config_id, f"Config-{config_id}")
+
+def variant_sort_key(result: dict) -> tuple:
+    """
+    Sort key ordering same-config variants ascending by their swept parameter(s).
+
+    Reads the actual numeric config fields rather than the filename string --
+    sorting by filename text breaks as soon as a swept value has a different
+    digit count (e.g. epsilon 5.0 would sort after 10.0, since "5" > "1"
+    lexicographically). Priority order (outermost/slowest-changing first):
+    topk_ratio, epsilon, num_client_iterations_per_round, num_clients --
+    matches tmp/template_excel_output.xlsx's hand-built column layout, reused
+    here for both bar_accuracy's bar ordering and the Excel table export.
+
+    Args:
+        result (dict): loaded result JSON.
+
+    Returns:
+        tuple: ascending sort key.
+    """
+    config = result["config"]
+    return (
+        config.get("topk_ratio", 0.0),
+        config.get("epsilon", 0.0),
+        config.get("num_client_iterations_per_round") or 0,
+        config.get("num_clients", 0),
+    )
+
 
 def extract_metric(result: dict, metric: str) -> tuple[list[int], list[float]]:
     """
@@ -205,7 +234,7 @@ def visualize_lines_per_config(folder: str) -> None:
 
     for config_id, group_results in sorted(config_groups.items()):
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-        fig.suptitle(replaceConfigWithLabel(str(config_id)) + " - Per Round Metrics", fontsize=13)
+        fig.suptitle(replace_config_with_label(str(config_id)) + " - Per Round Metrics", fontsize=13)
 
         for ax, metric in zip(axes, metrics):
             ax.set_title(titles[metric])
@@ -266,7 +295,7 @@ def visualize_bar_chart_per_config(folder: str) -> None:
     group_bars = []             # [(label, accuracy)] per group
     for config_id in config_ids:
         bars = []
-        for result in sorted(groups[config_id], key=lambda r: r["_filename"]):
+        for result in sorted(groups[config_id], key=variant_sort_key):
             # Take only final rounds accuracy
             final_accuracy = result["results"]["per_round"][-1].get("accuracy")
             if final_accuracy is None:
@@ -308,7 +337,7 @@ def visualize_bar_chart_per_config(folder: str) -> None:
         # center the group label under its bars
         group_center = (group_start + x - bar_width - 0.1) / 2
         tick_pos.append(group_center)
-        tick_lab.append(replaceConfigWithLabel(str(config_id)))
+        tick_lab.append(replace_config_with_label(str(config_id)))
         x += gap
 
     ax.set_xticks(tick_pos)
@@ -375,6 +404,248 @@ def visualize_bar_chart_per_config(folder: str) -> None:
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     print(f"Saved to: {output_path}")
     plt.close()
+
+
+def _box_border(ws, row1, col1, row2, col2, style="thin", top=True, bottom=True, left=True, right=True):
+    """
+    Draw a rectangular border around a cell range, preserving each cell's
+    existing border sides (openpyxl's Border is immutable, so a fresh Border
+    combining old + new sides has to be rebuilt per cell rather than just
+    assigning one side).
+
+    Args:
+        ws:                worksheet to draw on.
+        row1, col1, row2, col2 (int): 1-indexed range corners, inclusive.
+        style (str):        border line style, e.g. "thin" or "double".
+        top, bottom, left, right (bool): which edges of the range to draw.
+    """
+    side = Side(style=style)
+    for col in range(col1, col2 + 1):
+        if top:
+            cell = ws.cell(row=row1, column=col)
+            b = cell.border
+            cell.border = Border(top=side, bottom=b.bottom, left=b.left, right=b.right)
+        if bottom:
+            cell = ws.cell(row=row2, column=col)
+            b = cell.border
+            cell.border = Border(bottom=side, top=b.top, left=b.left, right=b.right)
+    for row in range(row1, row2 + 1):
+        if left:
+            cell = ws.cell(row=row, column=col1)
+            b = cell.border
+            cell.border = Border(left=side, top=b.top, bottom=b.bottom, right=b.right)
+        if right:
+            cell = ws.cell(row=row, column=col2)
+            b = cell.border
+            cell.border = Border(right=side, top=b.top, bottom=b.bottom, left=b.left)
+
+
+def _write_config_param_block(ws, config_id, variants, show_rl_row, label_col):
+    """
+    Write one config's title + Clients/Epsilon/Rl/TopK header rows at label_col,
+    reproducing the hand-built layout in tmp/template_excel_output.xlsx.
+
+    Shared by every per-config Excel table this module builds (see
+    export_excel_report()) so the title/parameter-row scaffold isn't
+    duplicated across them. Draws the title (bold, merged, centered), the
+    Clients / Epsilon / TopK rows (plus Rl if show_rl_row) giving that
+    column's value for whichever of those parameters this config actually
+    uses ("-" for a mechanism that's off for this config, e.g. Epsilon when
+    use_dp=False -- not omitted, so every table has the same row layout and
+    lines up across the sheet), and the borders down through the TopK row
+    (medium outer box, thin label-column divider, double bottom separator
+    under TopK). The caller is responsible for its own rows below the
+    returned TopK row, and for extending the outer box/divider down to its
+    own last row (same _box_border() calls, starting at topk_row + 1).
+
+    Args:
+        ws:                    worksheet to draw on.
+        config_id (int):       which config this block is for.
+        variants (list[dict]): this config's result JSONs, already sorted
+                               (e.g. by variant_sort_key()).
+        show_rl_row (bool):    whether to include the Rl row.
+        label_col (int):       1-indexed column this block starts at.
+
+    Returns:
+        tuple: (last_col, topk_row) -- last_col is this block's last data
+              column (label_col + len(variants)); topk_row is the row index
+              the caller's own rows should start right after.
+    """
+    TITLE_ROW, CLIENTS_ROW, EPSILON_ROW = 1, 2, 3
+    if show_rl_row:
+        RL_ROW, TOPK_ROW = 4, 5
+    else:
+        TOPK_ROW = 4
+    last_col = label_col + len(variants)
+
+    title_cell = ws.cell(row=TITLE_ROW, column=label_col, value=replace_config_with_label(str(config_id)))
+    ws.merge_cells(start_row=TITLE_ROW, start_column=label_col, end_row=TITLE_ROW, end_column=last_col)
+    title_cell.font = Font(bold=True)
+    title_cell.alignment = Alignment(horizontal="center")
+
+    ws.cell(row=CLIENTS_ROW, column=label_col, value="Clients")
+    ws.cell(row=EPSILON_ROW, column=label_col, value="Epsilon")
+    if show_rl_row:
+        ws.cell(row=RL_ROW, column=label_col, value="Rl")
+    ws.cell(row=TOPK_ROW, column=label_col, value="TopK")
+
+    CENTER = Alignment(horizontal="center")
+    for i, result in enumerate(variants):
+        config = result["config"]
+        data_col = label_col + 1 + i
+
+        ws.cell(row=CLIENTS_ROW, column=data_col, value=config["num_clients"]).alignment = CENTER
+        ws.cell(row=EPSILON_ROW, column=data_col,
+                value=config["epsilon"] if config["use_dp"] else "-").alignment = CENTER
+        if show_rl_row:
+            rl = config.get("num_client_iterations_per_round")
+            ws.cell(row=RL_ROW, column=data_col, value=rl if rl is not None else "-").alignment = CENTER
+        ws.cell(row=TOPK_ROW, column=data_col,
+                value=config["topk_ratio"] if config["use_topk"] else "-").alignment = CENTER
+
+    # Outer box top/left/right down through TOPK_ROW (medium) and title's own bottom separator
+    # (medium) -- the caller extends the box/divider down to its own last row once it knows how
+    # many rows it needs, and TopK's own bottom gets the double separator instead of the box's
+    # medium (drawn last so it wins).
+    _box_border(ws, TITLE_ROW, label_col, TOPK_ROW, last_col, style="medium", bottom=False)
+    _box_border(ws, TITLE_ROW, label_col, TITLE_ROW, last_col, style="medium", top=False, left=False, right=False)
+    _box_border(ws, CLIENTS_ROW, label_col, TOPK_ROW, label_col, style="thin", top=False, bottom=False, left=False)
+    _box_border(ws, TOPK_ROW, label_col, TOPK_ROW, last_col, style="double", top=False, left=False, right=False)
+
+    return last_col, TOPK_ROW
+
+
+def _write_accuracy_sheet(ws, groups, show_rl_row) -> None:
+    """
+    Build the per-config accuracy-by-round tables on ws, side by side.
+
+    One table per config, left to right in config_id order, via
+    _write_config_param_block(); below that, a bold Round/Accuracy header
+    row and one data row per round. Variants within a config are ordered by
+    variant_sort_key() (TopK outermost, then epsilon, then Rl, then Clients
+    innermost), matching bar_accuracy's ordering.
+
+    Args:
+        ws:              worksheet to draw on.
+        groups (dict):   config_id -> list of that config's result JSONs.
+        show_rl_row (bool): whether to include the Rl row (see _write_config_param_block()).
+    """
+    col = 1
+    for config_id in sorted(groups):
+        variants = sorted(groups[config_id], key=variant_sort_key)
+        label_col = col
+        last_col, topk_row = _write_config_param_block(ws, config_id, variants, show_rl_row, label_col)
+
+        header_row = topk_row + 1
+        header_cell = ws.cell(row=header_row, column=label_col, value="Round")
+        header_cell.font = Font(bold=True)
+
+        first_data_row = header_row + 1
+        max_round = 0
+        for i, result in enumerate(variants):
+            data_col = label_col + 1 + i
+            accuracy_header_cell = ws.cell(row=header_row, column=data_col, value="Accuracy")
+            accuracy_header_cell.font = Font(bold=True)
+
+            rounds, accuracies = extract_metric(result, "accuracy")
+            for r, accuracy in zip(rounds, accuracies):
+                ws.cell(row=first_data_row + r - 1, column=data_col, value=accuracy)
+            max_round = max(max_round, max(rounds, default=0))
+
+        for r in range(1, max_round + 1):
+            ws.cell(row=first_data_row + r - 1, column=label_col, value=r)
+
+        last_row = first_data_row + max_round - 1
+        _box_border(ws, header_row, label_col, last_row, last_col, style="medium", top=False)
+        _box_border(ws, header_row, label_col, last_row, label_col, style="thin", top=False, bottom=False, left=False)
+        _box_border(ws, header_row, label_col, header_row, last_col, style="thin", top=False, left=False, right=False)
+
+        col = last_col + 1
+
+
+def _write_elapsed_time_sheet(ws, groups, show_rl_row) -> None:
+    """
+    Build the per-config elapsed-time tables on ws, side by side.
+
+    One table per config, left to right in config_id order, via
+    _write_config_param_block(); below that, two summary rows per variant --
+    average time per round (elapsed_seconds / num_rounds) and total
+    wall-clock time (elapsed_seconds) -- instead of accuracy's per-round
+    breakdown, since wall-clock time is a single number per run, not a
+    per-round series.
+
+    Args:
+        ws:              worksheet to draw on.
+        groups (dict):   config_id -> list of that config's result JSONs.
+        show_rl_row (bool): whether to include the Rl row (see _write_config_param_block()).
+    """
+    col = 1
+    for config_id in sorted(groups):
+        variants = sorted(groups[config_id], key=variant_sort_key)
+        label_col = col
+        last_col, topk_row = _write_config_param_block(ws, config_id, variants, show_rl_row, label_col)
+
+        avg_row = topk_row + 1
+        total_row = topk_row + 2
+        ws.cell(row=avg_row, column=label_col, value="Avg s/round")
+        ws.cell(row=total_row, column=label_col, value="Total elapsed (s)")
+
+        CENTER = Alignment(horizontal="center")
+        for i, result in enumerate(variants):
+            data_col = label_col + 1 + i
+            elapsed = result["results"].get("elapsed_seconds")
+            num_rounds = result["config"]["num_rounds"]
+            avg_per_round = elapsed / num_rounds if elapsed is not None and num_rounds else None
+
+            ws.cell(row=avg_row, column=data_col,
+                    value=round(avg_per_round, 3) if avg_per_round is not None else None).alignment = CENTER
+            ws.cell(row=total_row, column=data_col,
+                    value=round(elapsed, 1) if elapsed is not None else None).alignment = CENTER
+
+        _box_border(ws, avg_row, label_col, total_row, last_col, style="medium", top=False)
+        _box_border(ws, avg_row, label_col, total_row, label_col, style="thin", top=False, bottom=False, left=False)
+
+        col = last_col + 1
+
+
+def export_excel_report(folder: str) -> None:
+    """
+    Export the full Excel report for a results folder: one workbook, two
+    sheets, each laying out one bordered table per config side by side --
+    "Accuracy by Round" (per-round accuracy, see _write_accuracy_sheet()) and
+    "Elapsed Time" (avg time per round + total wall-clock time, see
+    _write_elapsed_time_sheet()). Reproduces the hand-built layout in
+    tmp/template_excel_output.xlsx for the shared title/Clients/Epsilon/Rl/TopK
+    header block (_write_config_param_block()).
+
+    The Rl row (shared by both sheets) is only added at all if at least one
+    result in folder actually has num_client_iterations_per_round set --
+    older result files predate that field entirely, and it's meaningless
+    clutter (an all-"-" row) for a folder where nothing set it. Reads every
+    JSON file present in folder via load_results(), so this works for any
+    number of config runs/variants, same as every other visualize_* function.
+
+    Args:
+        folder (str): path to folder containing result JSON files.
+    """
+    results = load_results(folder)
+    show_rl_row = any(r["config"].get("num_client_iterations_per_round") is not None for r in results)
+
+    groups = defaultdict(list)
+    for result in results:
+        groups[result["config"]["config_id"]].append(result)
+
+    wb = Workbook()
+    accuracy_ws = wb.active
+    accuracy_ws.title = "Accuracy by Round"
+    _write_accuracy_sheet(accuracy_ws, groups, show_rl_row)
+
+    elapsed_ws = wb.create_sheet("Elapsed Time")
+    _write_elapsed_time_sheet(elapsed_ws, groups, show_rl_row)
+
+    output_path = os.path.join(folder, "accuracy_by_round.xlsx")
+    wb.save(output_path)
+    print(f"Saved to: {output_path}")
 
 
 def get_base_accuracy_and_max_epsilon(results):
@@ -564,7 +835,7 @@ def visualize_radar_chart_per_config(folder: str) -> None:
         ax      = axes[idx]
         variants = config_groups[config_id]
 
-        ax.set_title(replaceConfigWithLabel(str(config_id)), fontsize=10, pad=10)
+        ax.set_title(replace_config_with_label(str(config_id)), fontsize=10, pad=10)
 
         for i, (label, scores) in enumerate(variants):
             values  = [scores[PRIVACY_KEY],
@@ -633,7 +904,7 @@ def visualize_confusion_matrices(folder: str) -> None:
         mat_norm = np.where(row_sums > 0, mat / row_sums, 0)
 
         im = ax.imshow(mat_norm, interpolation="nearest", cmap="Blues", vmin=0, vmax=1)
-        ax.set_title(f"{replaceConfigWithLabel(str(config_id))}\n{label}", fontsize=7)
+        ax.set_title(f"{replace_config_with_label(str(config_id))}\n{label}", fontsize=7)
         ax.set_xlabel("Predicted", fontsize=8)
         ax.set_ylabel("True", fontsize=8)
         ax.set_xticks(range(num_classes))
@@ -699,7 +970,7 @@ def visualize_f1_score(folder: str) -> None:
             values = [scores[str(d)][metric] for d in range(num_classes)]
             ax.bar(x + m_idx * width, values, width, label=metric, color=color, alpha=0.85)
 
-        ax.set_title(f"{replaceConfigWithLabel(str(config_id))}\n{label}", fontsize=7)
+        ax.set_title(f"{replace_config_with_label(str(config_id))}\n{label}", fontsize=7)
         ax.set_xlabel("Digit class", fontsize=8)
         ax.set_ylabel("Score", fontsize=8)
         ax.set_xticks(x + width)
@@ -737,7 +1008,7 @@ def visualize_f1_tables(folder: str) -> None:
     for config_id, (label, scores, matrix) in sorted(config_data.items()):
         fig, ax = plt.subplots(figsize=(12, 4))
         test_size = sum(sum(row) for row in matrix)
-        ax.set_title(f"{replaceConfigWithLabel(str(config_id))} - {label} (n={test_size:,})", fontsize=10, pad=10)
+        ax.set_title(f"{replace_config_with_label(str(config_id))} - {label} (n={test_size:,})", fontsize=10, pad=10)
         ax.axis("off")
 
         col_labels   = ["Class", "TP", "FP", "FN", "TN", "Precision", "Recall", "F1"]
@@ -960,13 +1231,16 @@ def visualize_trust_per_client(folder: str) -> None:
     honest or malicious, with a small horizontal spread (not random jitter,
     so the plot is reproducible) so points inside a group don't overlap.
     Non-FLTrust variants never produce trust scores, so they're excluded.
+    DP+FLTrust variants are excluded too -- DP noise degrades the
+    cosine-similarity trust signal, so mixing them in would muddy the
+    honest-vs-malicious separation this plot is meant to show.
 
     Args:
         folder (str): path to folder containing result JSON files.
     """
-    results = [r for r in load_results(folder) if r["config"]["use_fltrust"]]
+    results = [r for r in load_results(folder) if r["config"]["use_fltrust"] and not r["config"]["use_dp"]]
     if not results:
-        print("No FLTrust-enabled result files found -- skipping per-client trust plot.")
+        print("No non-DP FLTrust-enabled result files found -- skipping per-client trust plot.")
         return
     results.sort(key=lambda r: (r["config"]["config_id"], r["_filename"]))
 
@@ -1046,14 +1320,17 @@ def _honest_vs_malicious_by_round(results: list[dict]) -> tuple[list[int], list,
 def visualize_trust_over_rounds(folder: str) -> None:
     """
     Honest vs. malicious average trust score per round, pooled across every
-    FLTrust-enabled config variant in the folder.
+    non-DP FLTrust-enabled config variant in the folder. DP+FLTrust variants
+    are excluded -- DP noise degrades the cosine-similarity trust signal, so
+    pooling them in would muddy the honest-vs-malicious separation this plot
+    is meant to show.
 
     Args:
         folder (str): path to folder containing result JSON files.
     """
-    results = [r for r in load_results(folder) if r["config"]["use_fltrust"]]
+    results = [r for r in load_results(folder) if r["config"]["use_fltrust"] and not r["config"]["use_dp"]]
     if not results:
-        print("No FLTrust-enabled result files found -- skipping trust-over-rounds plot.")
+        print("No non-DP FLTrust-enabled result files found -- skipping trust-over-rounds plot.")
         return
 
     rounds, honest_avg, malicious_avg = _honest_vs_malicious_by_round(results)
@@ -1078,16 +1355,20 @@ def visualize_trust_over_rounds(folder: str) -> None:
 def visualize_trust_over_rounds_per_config(folder: str) -> None:
     """
     Honest vs. malicious average trust score per round, one subplot per
-    FLTrust-enabled config family (pooling that config's own variants, e.g.
-    its different epsilon/topk_ratio values) -- so DP/TopK's effect on trust
-    isn't averaged away against plain-FLTrust configs.
+    non-DP FLTrust-enabled config family (pooling that config's own variants,
+    e.g. its different topk_ratio values) -- so TopK's effect on trust isn't
+    averaged away against plain-FLTrust. DP+FLTrust configs are excluded --
+    DP noise degrades the cosine-similarity trust signal, so including them
+    would muddy the honest-vs-malicious separation this plot is meant to
+    show (this does mean DP's own effect on trust is no longer compared
+    here, only TopK's).
 
     Args:
         folder (str): path to folder containing result JSON files.
     """
-    results = [r for r in load_results(folder) if r["config"]["use_fltrust"]]
+    results = [r for r in load_results(folder) if r["config"]["use_fltrust"] and not r["config"]["use_dp"]]
     if not results:
-        print("No FLTrust-enabled result files found -- skipping per-config trust-over-rounds plot.")
+        print("No non-DP FLTrust-enabled result files found -- skipping per-config trust-over-rounds plot.")
         return
 
     config_groups = defaultdict(list)
@@ -1105,7 +1386,7 @@ def visualize_trust_over_rounds_per_config(folder: str) -> None:
         ax = axes[idx]
         rounds, honest_avg, malicious_avg = _honest_vs_malicious_by_round(config_groups[config_id])
 
-        ax.set_title(replaceConfigWithLabel(str(config_id)), fontsize=10)
+        ax.set_title(replace_config_with_label(str(config_id)), fontsize=10)
         ax.set_xlabel("Round", fontsize=8)
         ax.set_ylabel("Avg trust score", fontsize=8)
         ax.set_ylim(0, 1.05)
@@ -1137,7 +1418,7 @@ if __name__ == "__main__":
     parser.add_argument("--plot", type=str,
                         choices=["all", "lines", "bar", "radar", "radar_per_conf", "lines_per_conf",
                                  "confusion", "f1_chart", "f1_table_per_conf", "label_dist",
-                                 "trust_per_client", "trust_rounds", "trust_rounds_per_conf"],
+                                 "trust_per_client", "trust_rounds", "trust_rounds_per_conf", "excel"],
                         default="all",
                         help="which plot to generate (default: all)")
     args = parser.parse_args(args=None if len(sys.argv) > 1 else ["--help"])
@@ -1166,3 +1447,5 @@ if __name__ == "__main__":
         visualize_trust_over_rounds(args.folder)
     if args.plot in ("all", "trust_rounds_per_conf"):
         visualize_trust_over_rounds_per_config(args.folder)
+    if args.plot in ("all", "excel"):
+        export_excel_report(args.folder)
