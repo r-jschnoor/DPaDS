@@ -4,9 +4,6 @@
 
 - Analyze the three axes of the trilemma triangle and propose improvements to the calculation of each metric (robusness, privacy, efficiency). Then Trilemma Triangle chart update how edges are computed (see README.md)
 
-- Can we calculate the bytes sent for the large run (20260712_035938)?
-- remove dots from general visualization plot (and other relevant ones)
-- Put dp back into trust_over_rounds_per_config and one file per chart
 
 
 -----
@@ -23,7 +20,7 @@
 Parameters to test in a series run: ds(mnist), Eps(1,(5),10), topk(0.01,0.1,(0.5)), clients(10,30,60,(80,100)), configs(1-8) --> 2x2x3x8=92 || 3x3x5x8=360
 
 1. Run ohne attack mit BASE config (DONE)
-2. Run Eps(1,10), topk(0.01), clients(10,30,60), configs(1-8)       (ignore all non topk configs)!!!!
+2. Run Eps(1,10), topk(0.01), clients(10,30,60), configs(4,6-8) (Currently running)
 
 3. Run ds(mnist), Eps(1,10), topk(0.01,0.1), clients(10,30,60), configs(1-8), num_rounds(250), byzantine-frac(0.4)
 
@@ -40,6 +37,7 @@ Parameters to test in a series run: ds(mnist), Eps(1,(5),10), topk(0.01,0.1,(0.5
 -----
 
 ### What to do next
+
 
 
 

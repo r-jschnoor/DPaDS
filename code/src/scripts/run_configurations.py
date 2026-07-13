@@ -29,8 +29,8 @@ DEFAULT_GPU_INDEX = 0         # None -> auto-pick the GPU with most free VRAM.
 SHARED_PARAMS = dict(
     dataset = DEFAULT_DATASET,
     num_clients = 50,
-    num_rounds = 500,
-    num_byzantine = 10,
+    num_rounds = 250,
+    num_byzantine = 20,   # byzantine_fraction = num_byzantine/num_clients = 0.4
     root_dataset_size = 2000,
     rescale_to_ref_norm = False,
     seed = 42,  # Same data split + initial model across a config sweep, so
@@ -94,10 +94,10 @@ BASE_CONFIGS = {
 }
 
 # Variants to explore
-EPSILON_VALUES = [1.0, 10.0]    
-TOPK_VALUES = [0.1, 0.5]        # TODO with 0.01
+EPSILON_VALUES = [1.0, 10.0]
+TOPK_VALUES = [0.01, 0.1]
 RL_VALUES = [10]
-NUM_CLIENTS = [10, 30, 60, 80, 100]
+NUM_CLIENTS = [10, 30, 60]
 
 
 def expand_config(base: ExperimentConfig) -> list[ExperimentConfig]:

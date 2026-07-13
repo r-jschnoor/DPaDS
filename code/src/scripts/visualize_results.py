@@ -10,6 +10,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, Side
 
 from src.models import get_dataset_spec
+from src.mechanisms.topk import topk_sparsify, update_size_bytes
 
 
 def _io_path(path: str) -> str:
@@ -196,7 +197,7 @@ def visualize_overview(folder: str) -> None:
             if not values:
                 continue
             label = make_label(result["_filename"])
-            ax.plot(rounds, values, marker="o", label=label)
+            ax.plot(rounds, values, label=label)
             any_plotted = True
 
         if any_plotted:
@@ -261,8 +262,8 @@ def visualize_lines_per_config(folder: str) -> None:
                 if not values:
                     continue
                 label = make_label(result["_filename"])
-                ax.plot(rounds, values, marker="o", label=label)
-            
+                ax.plot(rounds, values, label=label)
+
             # Make sure empty plots dont throw warnings if there is nothing to plot
             handles, _ = ax.get_legend_handles_labels()
             if handles:
@@ -1335,6 +1336,92 @@ def visualize_label_distribution(folder: str) -> None:
     plt.close()
 
 
+# TopK ratios to show in visualize_bytes_per_client_topk() -- 0.01/0.1/0.5 match
+# run_configurations.py's planned/actual TOPK_VALUES sweeps, 1.0 is the dense/no-TopK
+# reference bar.
+BYTES_CHART_TOPK_RATIOS = [0.01, 0.1, 0.5, 1.0]
+
+
+def visualize_bytes_per_client_topk(folder: str) -> None:
+    """
+    Bar chart of per-client, per-round communication size at different TopK
+    keep ratios (BYTES_CHART_TOPK_RATIOS), plus a dense/no-TopK reference bar.
+
+    Deliberately not tied to any experiment's results: per-client bytes only
+    depend on the dataset's model size and topk_ratio, never on num_clients,
+    DP, FLTrust, seed, etc. (see mechanisms/topk.py). So this doesn't call
+    load_results() and doesn't require the folder to contain anything --
+    `folder` is used purely as an output location, same convention every
+    other plot in this file already follows. If the folder does contain
+    result files, the first one's `config.dataset` is used so a CIFAR-10
+    run's folder gets CIFAR-10-sized bars; otherwise defaults to "mnist".
+    Reuses the actual production math (`topk_sparsify()` + `update_size_bytes()`)
+    against a dummy parameter vector instead of recomputing the formula by
+    hand, so this chart can't drift out of sync with what those functions
+    compute for a real run.
+
+    This calls `update_size_bytes()` the same way a single client's own
+    `fit()` does (client.py/mechanisms/attacks.py) -- i.e. every bar is one
+    client's per-round bytes. That is *not* the same number as a result
+    JSON's per-round `update_bytes` field, which is the sum across all
+    participating clients that round (see HistoryStrategyAdapter.aggregate_fit()
+    in server.py, and the "communication-size metric" entry in
+    src/README.md) and therefore scales with num_clients -- this chart
+    deliberately shows the num_clients-independent, single-client figure
+    instead.
+
+    Caveat (not drawn on the chart, so it doesn't get lost if the image is
+    used standalone): per mechanisms/topk.py's own docstring, the k<1.0 bars
+    are the *logical* sparse-encoding cost a real (index, value) wire format
+    would need, not what's actually transmitted in this simulation today --
+    `fit()` still returns a dense array regardless of topk_ratio, so every
+    config's real current bytes-on-wire matches the k=1.0 (dense) bar. See
+    src/README.md item 15 for the full writeup.
+
+    Args:
+        folder (str): folder to save the chart into. Read from (best-effort
+                      dataset detection) if it already contains result files,
+                      but not required to.
+    """
+    dataset = "mnist"
+    for filepath in sorted(glob.glob(os.path.join(folder, "*.json"))):
+        if os.path.basename(filepath) == "run_summary.json":
+            continue
+        with open(_io_path(filepath)) as f:
+            dataset = json.load(f).get("config", {}).get("dataset", "mnist")
+        break
+
+    dataset_spec = get_dataset_spec(dataset)
+    num_params = sum(p.numel() for p in dataset_spec.model_fn().parameters())
+    dummy_update = np.ones(num_params, dtype=np.float32)   # magnitudes are irrelevant, only count/dtype size matter
+
+    bar_labels, bytes_per_ratio = [], []
+    for k in BYTES_CHART_TOPK_RATIOS:
+        if k == 1.0:
+            bar_labels.append("Dense\n(no TopK)")
+            bytes_per_ratio.append(update_size_bytes([dummy_update], use_topk=False))
+        else:
+            bar_labels.append(f"{k:.0%}")
+            sparsified = topk_sparsify(dummy_update, k)
+            bytes_per_ratio.append(update_size_bytes(None, use_topk=True, sparsified_update=sparsified))
+
+    kb_per_ratio = [b / 1024 for b in bytes_per_ratio]
+
+    os.makedirs(folder, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.set_title(f"Per-Client Communication Size with TopK ({dataset})", fontsize=13)
+    ax.set_ylabel("KB per client per round")
+    ax.grid(axis="y", alpha=0.3)
+    bars = ax.bar(bar_labels, kb_per_ratio, color=plt.cm.tab10.colors[:len(bar_labels)])
+    ax.bar_label(bars, fmt="%.1f KB", fontsize=8)
+
+    plt.tight_layout()
+    output_path = os.path.join(folder, "bytes_per_client.png")
+    plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
+    print(f"Saved to: {output_path}")
+    plt.close()
+
+
 # Fixed colors for the honest/malicious split, reused across every trust
 # plot below -- never cycled or reassigned per config/client like the tab10
 # colors elsewhere in this file, since honest vs. malicious is a fixed,
@@ -1369,14 +1456,14 @@ def visualize_trust_per_client(folder: str) -> None:
     honest or malicious, with a small horizontal spread (not random jitter,
     so the plot is reproducible) so points inside a group don't overlap.
     Non-FLTrust variants never produce trust scores, so they're excluded.
-    DP+FLTrust variants are excluded too -- DP noise degrades the
-    cosine-similarity trust signal, so mixing them in would muddy the
-    honest-vs-malicious separation this plot is meant to show.
+    DP+FLTrust variants are included -- DP noise degrades the cosine-
+    similarity trust signal, but seeing that degradation next to plain
+    FLTrust's clean separation is itself informative.
 
     Args:
         folder (str): path to folder containing result JSON files.
     """
-    results = [r for r in load_results(folder) if r["config"]["use_fltrust"] and not r["config"]["use_dp"]]
+    results = [r for r in load_results(folder) if r["config"]["use_fltrust"]]
     if not results:
         print("No non-DP FLTrust-enabled result files found -- skipping per-client trust plot.")
         return
@@ -1458,17 +1545,16 @@ def _honest_vs_malicious_by_round(results: list[dict]) -> tuple[list[int], list,
 def visualize_trust_over_rounds(folder: str) -> None:
     """
     Honest vs. malicious average trust score per round, pooled across every
-    non-DP FLTrust-enabled config variant in the folder. DP+FLTrust variants
-    are excluded -- DP noise degrades the cosine-similarity trust signal, so
-    pooling them in would muddy the honest-vs-malicious separation this plot
-    is meant to show.
+    FLTrust-enabled config variant in the folder, DP+FLTrust included -- DP
+    noise degrades the cosine-similarity trust signal, but pooling it in
+    alongside plain FLTrust shows that degradation rather than hiding it.
 
     Args:
         folder (str): path to folder containing result JSON files.
     """
-    results = [r for r in load_results(folder) if r["config"]["use_fltrust"] and not r["config"]["use_dp"]]
+    results = [r for r in load_results(folder) if r["config"]["use_fltrust"]]
     if not results:
-        print("No non-DP FLTrust-enabled result files found -- skipping trust-over-rounds plot.")
+        print("No FLTrust-enabled result files found -- skipping trust-over-rounds plot.")
         return
 
     rounds, honest_avg, malicious_avg = _honest_vs_malicious_by_round(results)
@@ -1479,8 +1565,8 @@ def visualize_trust_over_rounds(folder: str) -> None:
     ax.set_ylabel("Avg trust score")
     ax.set_ylim(0, 1.05)
     ax.grid(True, alpha=0.3)
-    ax.plot(rounds, honest_avg, color=HONEST_COLOR, linewidth=2, marker="o", markersize=3, label="Honest")
-    ax.plot(rounds, malicious_avg, color=MALICIOUS_COLOR, linewidth=2, marker="o", markersize=3, label="Malicious")
+    ax.plot(rounds, honest_avg, color=HONEST_COLOR, linewidth=2, label="Honest")
+    ax.plot(rounds, malicious_avg, color=MALICIOUS_COLOR, linewidth=2, label="Malicious")
     ax.legend(fontsize=9, loc="best")
 
     plt.tight_layout()
@@ -1492,55 +1578,48 @@ def visualize_trust_over_rounds(folder: str) -> None:
 
 def visualize_trust_over_rounds_per_config(folder: str) -> None:
     """
-    Honest vs. malicious average trust score per round, one subplot per
-    non-DP FLTrust-enabled config family (pooling that config's own variants,
-    e.g. its different topk_ratio values) -- so TopK's effect on trust isn't
-    averaged away against plain-FLTrust. DP+FLTrust configs are excluded --
-    DP noise degrades the cosine-similarity trust signal, so including them
-    would muddy the honest-vs-malicious separation this plot is meant to
-    show (this does mean DP's own effect on trust is no longer compared
-    here, only TopK's).
+    Honest vs. malicious average trust score per round, one file per
+    FLTrust-enabled config family (pooling that config's own variants, e.g.
+    its different topk_ratio values) -- so TopK's effect on trust isn't
+    averaged away against plain FLTrust. DP+FLTrust configs are included --
+    DP noise degrades the cosine-similarity trust signal, but seeing that
+    degradation next to plain FLTrust's clean separation is itself
+    informative. Saves one PNG per config into a subfolder, same pattern as
+    `visualize_f1_tables()`/`visualize_lines_per_config()`.
 
     Args:
         folder (str): path to folder containing result JSON files.
     """
-    results = [r for r in load_results(folder) if r["config"]["use_fltrust"] and not r["config"]["use_dp"]]
+    results = [r for r in load_results(folder) if r["config"]["use_fltrust"]]
     if not results:
-        print("No non-DP FLTrust-enabled result files found -- skipping per-config trust-over-rounds plot.")
+        print("No FLTrust-enabled result files found -- skipping per-config trust-over-rounds plot.")
         return
 
     config_groups = defaultdict(list)
     for result in results:
         config_groups[result["config"]["config_id"]].append(result)
 
-    config_ids = sorted(config_groups.keys())
-    cols = min(4, len(config_ids))
-    rows = (len(config_ids) + cols - 1) // cols
-    fig, axes = plt.subplots(rows, cols, figsize=(cols * 4.5, rows * 4), squeeze=False)
-    fig.suptitle("Honest vs Malicious Avg Trust per Round, per Config", fontsize=14)
-    axes = axes.flatten()
+    subfolder_name = "trust_over_rounds_per_config"
+    os.makedirs(os.path.join(folder, subfolder_name), exist_ok=True)
 
-    for idx, config_id in enumerate(config_ids):
-        ax = axes[idx]
-        rounds, honest_avg, malicious_avg = _honest_vs_malicious_by_round(config_groups[config_id])
+    for config_id, group_results in sorted(config_groups.items()):
+        rounds, honest_avg, malicious_avg = _honest_vs_malicious_by_round(group_results)
 
-        ax.set_title(replace_config_with_label(str(config_id)), fontsize=10)
-        ax.set_xlabel("Round", fontsize=8)
-        ax.set_ylabel("Avg trust score", fontsize=8)
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.set_title(f"{replace_config_with_label(str(config_id))} - Honest vs Malicious Avg Trust per Round", fontsize=12)
+        ax.set_xlabel("Round")
+        ax.set_ylabel("Avg trust score")
         ax.set_ylim(0, 1.05)
         ax.grid(True, alpha=0.3)
-        ax.plot(rounds, honest_avg, color=HONEST_COLOR, linewidth=1.5, marker="o", markersize=2, label="Honest")
-        ax.plot(rounds, malicious_avg, color=MALICIOUS_COLOR, linewidth=1.5, marker="o", markersize=2, label="Malicious")
-        ax.legend(fontsize=7, loc="best")
+        ax.plot(rounds, honest_avg, color=HONEST_COLOR, linewidth=1.5, label="Honest")
+        ax.plot(rounds, malicious_avg, color=MALICIOUS_COLOR, linewidth=1.5, label="Malicious")
+        ax.legend(fontsize=9, loc="best")
 
-    for idx in range(len(config_ids), len(axes)):
-        axes[idx].set_visible(False)
-
-    plt.tight_layout()
-    output_path = os.path.join(folder, "trust_over_rounds_per_config.png")
-    plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
-    print(f"Saved to: {output_path}")
-    plt.close()
+        plt.tight_layout()
+        output_path = os.path.join(folder, subfolder_name, f"trust_over_rounds_config_{config_id}.png")
+        plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
+        print(f"Saved to: {output_path}")
+        plt.close()
 
 
 if __name__ == "__main__":
@@ -1557,9 +1636,10 @@ if __name__ == "__main__":
                         choices=["all", "lines", "bar", "radar", "radar_per_conf", "lines_per_conf",
                                  "confusion", "f1_chart", "f1_table_per_conf", "label_dist",
                                  "trust_per_client", "trust_rounds", "trust_rounds_per_conf", "excel",
-                                 "duration_per_conf"],
+                                 "duration_per_conf", "bytes_bar"],
                         default="all",
-                        help="which plot to generate (default: all)")
+                        help="which plot to generate (default: all). 'bytes_bar' is not included in "
+                             "'all' since it's a model-size fact, not a per-run result")
     args = parser.parse_args(args=None if len(sys.argv) > 1 else ["--help"])
 
     if args.plot in ("all", "lines"):
@@ -1590,3 +1670,5 @@ if __name__ == "__main__":
         export_excel_report(args.folder)
     if args.plot in ("all", "duration_per_conf"):
         visualize_duration_per_config(args.folder)
+    if args.plot == "bytes_bar":
+        visualize_bytes_per_client_topk(args.folder)
