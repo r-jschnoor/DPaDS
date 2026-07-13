@@ -379,6 +379,7 @@ Available configs:
 Usage:
   python scripts/run_grid.py --config 1              run config 1 (baseline)
   python scripts/run_grid.py --config 2              run config 2 (all epsilon variants)
+  python scripts/run_grid.py --configs 4,6,7,8       run just the TopK configs sequentially
   python scripts/run_grid.py --all                   run all configs sequentially
   python scripts/run_grid.py --config 1 --no-attack   run config 1 with num_byzantine forced
                                                        to 0 (clean/no-attack baseline)
@@ -396,6 +397,8 @@ if __name__ == "__main__":
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--config", type=int, choices=range(1, 9),
                        metavar="N", help="run config N (1-8)")
+    group.add_argument("--configs", type=str, metavar="N,N,...",
+                       help="run a comma-separated subset of configs, e.g. --configs 4,6,7,8")
     group.add_argument("--all", action="store_true",
                        help="run all configs sequentially")
     parser.add_argument("--max-cpus", type=int, default=DEFAULT_MAX_CPUS, metavar="N",
@@ -417,6 +420,10 @@ if __name__ == "__main__":
     if args.all:
         configs_to_run = [c for base in BASE_CONFIGS.values()
                           for c in expand_config(base)]
+    elif args.configs:
+        config_ids = [int(cid) for cid in args.configs.split(",")]
+        configs_to_run = [c for cid in config_ids
+                          for c in expand_config(BASE_CONFIGS[cid])]
     else:
         configs_to_run = expand_config(BASE_CONFIGS[args.config])
 

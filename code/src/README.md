@@ -842,3 +842,77 @@ always exactly 2 summary rows) and only the caller knows its own final row once 
 Verified against a real result folder (24 files, all 8 configs): both sheets render with matching
 header blocks and correct borders, `Avg s/round` values divide out consistently with `Total elapsed
 (s)` and each variant's `num_rounds`.
+
+## Full grid run analysis (`20260712_035938`)
+
+Analysis of the first completed full factorial sweep (`TODO.md`'s "Upcoming runs" item 2): MNIST, all
+8 configs, DP configs expanded over epsilon in {1, 10}, TopK configs over k in {0.1, 0.5}, every config
+expanded over `num_clients` in {10, 30, 60} with `num_byzantine` scaled to hold the 20% malicious
+fraction constant, 500 rounds each, label-flip attack (source=3, target=7, `attack_scale=2.0`), seed=42.
+54 result files, 26.3h total wall-clock (`run_summary.json`). Note: `run_configurations.py`'s
+`NUM_CLIENTS` now also lists 80 and 100, but git history confirms that was added after this run was
+started -- these 54 files only cover the 10/30/60 tier, not the 5-tier grid the script currently
+describes.
+
+### Accuracy: baseline is already attack-tolerant at scale; DP is the expensive mechanism
+
+Final-round accuracy (n=60, i.e. the largest/most stable tier): baseline (config 1, no defense, under
+attack) 0.9785, FLTrust alone (config 3) 0.9798, DP alone (config 2) 0.787-0.802 depending on epsilon,
+DP+TopK (config 6) 0.626-0.796 (worst combination in the grid), FLTrust+TopK (config 7) 0.975-0.980
+(barely distinguishable from FLTrust alone). Two things follow: the 20%-Byzantine label-flip attack at
+`attack_scale=2.0` is mild enough that plain FedAvg already dilutes it well once n>=30 (source-class "3"
+recall only drops to 0.96 at baseline n=60 vs 0.98 with FLTrust), so FLTrust's accuracy contribution
+here is modest; DP is what actually costs accuracy (recall(3) drops to 0.64-0.68), and stacking TopK on
+top of DP compounds that further (recall(3) as low as 0.54, recall(7) as low as 0.26 for config 6,
+k=0.1, n=60) -- the sharpest visible privacy+efficiency-vs-performance tension in the whole grid.
+
+### DP+FLTrust epsilon inversion
+
+Without FLTrust, epsilon behaves as expected: config 2, n=10, epsilon=10 (0.797) beats epsilon=1
+(0.783), a small gain in the expected direction. With FLTrust on (configs 5, 8), this flips at every
+client count: config 5, n=60, epsilon=1 gives 0.9335 vs epsilon=10's 0.8577 -- a 7.6-point gain from
+*more* noise, not less. Same pattern in config 8 (all three mechanisms on). `noise_multiplier` values
+confirm the accountant itself is fine (epsilon=1 -> noise_mult 6.8-16.4, epsilon=10 -> noise_mult
+1.1-2.2, correct direction; measured cumulative epsilon after 500 rounds stays well under target in
+both cases). The trust-score data below explains the flip: under DP, FLTrust's honest-vs-malicious
+separation nearly vanishes, so at epsilon=10 (less noise) the label-flip attacker's *coherent* wrong
+gradient survives mostly intact and FLTrust is too noise-corrupted to discount it, while at epsilon=1
+(heavy noise) that same attack signal gets scrambled by the same noise scrambling the honest updates,
+so it partially cancels out during averaging even though FLTrust isn't really discriminating either. In
+short: extra DP noise accidentally acts as its own Byzantine defense here, while FLTrust contributes
+essentially nothing once DP is active -- a sharper, numerically confirmed version of this file's
+opening "DP and FLTrust do not work well with each other" note.
+
+### Trust scores: clean separation without DP, destroyed by DP
+
+Without DP (configs 3, 7): honest and malicious trust overlap for the first ~20-40 rounds (~0.4-0.65,
+before the global model has converged enough for direction to matter), then split cleanly -- honest
+climbs to ~0.8 then settles into a noisy ~0.10 floor with occasional spikes to 0.3-0.5, malicious
+collapses to ~0.001-0.008 and stays there for the remaining ~460 rounds. That is a sustained 10-100x
+gap -- malicious clients are easily distinguishable here once FLTrust has warmed up. With DP added
+(configs 5, 8): honest and malicious trust are both ~0.001-0.01 from round 1 onward and stay
+statistically indistinguishable the entire run (e.g. config 5, epsilon=1, n=60: honest late-round mean
+0.0012 vs malicious 0.0011). DP noise does not just cost accuracy directly -- it disables FLTrust's own
+discriminative signal as a side effect, so the two mechanisms actively undermine each other rather than
+just separately taxing performance.
+
+### Communication cost: not measured for this run, and TopK saves nothing on the wire regardless
+
+These 54 result files predate the `update_bytes` metric (added in a later commit, see "communication-
+size metric" above) -- none of them record bytes transmitted. Computed manually instead:
+`MnistCNN` has 105,866 float32 parameters (423,464 bytes/client/round dense), and every strategy here
+uses `fraction_fit=1.0` (all clients every round), so real bytes-on-wire for *any* config in this grid
+is `num_clients * 500 * 423,464` regardless of `use_topk` or `topk_ratio` -- per item 15 above, `fit()`
+still returns a dense array today, so TopK configs transmit exactly as many bytes as non-TopK ones at
+matching `num_clients`. Even the *logical* sparse-encoding estimate `update_bytes` would report if wired
+through only pays off below k=0.5: at k=0.5, `nonzero * (value + 4-byte index)` exactly equals the dense
+size (zero saving), and only k=0.1 would yield a real reduction (~80%) if implemented. So every TopK
+config in this grid (4, 6, 7, 8) paid its accuracy cost (confirmed above, real) for a communication
+benefit that is currently neither implemented in the simulation nor recorded in these result files.
+
+### Visualization: `radar_trilemma.png` doesn't scale to 54 variants
+
+`visualize_radar_chart()` draws one polygon per result file with no per-config color grouping; at 54
+files the legend is illegible and the overlapping fills obscure most individual variants.
+`radar_per_config.png` (one subplot per config) stayed readable and is the more useful chart for a
+folder this size -- worth defaulting to for large sweeps rather than the single combined chart.
