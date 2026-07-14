@@ -6,7 +6,6 @@
 \usepackage{hyperref}
 \usepackage{mathptmx}
 \usepackage[scaled=.92]{helvet}
-\usepackage{booktabs}
 \usepackage{amsmath, amsthm}
 \newtheorem{theorem}{Theorem}
 \newtheorem{definition}{Definition}
@@ -20,9 +19,7 @@
 \usepackage{placeins}
 \usepackage{tabularx}
 \usepackage{booktabs}
-\usepackage{multirow}
 \usepackage{longtable}
-\usepackage[table]{xcolor}
 \usepackage{booktabs}
 \usepackage[table,xcdraw]{xcolor}
 \pgfplotsset{compat=1.18}
@@ -44,14 +41,7 @@
 	\maketitle
 	
 	\begin{abstract}
-		Federated Learning (FL) enables collaborative model training without sharing local data but requires simultaneously addressing privacy, Byzantine robustness, and communication efficiency. This work empirically investigates the interaction between \ac{DP-SGD}, FLTrust aggregation, and Top-$k$ gradient sparsification in the context of this privacy--robustness--performance trilemma.
-		
-		An end-to-end experimental pipeline integrating all three mechanisms in a modular architecture was developed to evaluate their isolated and combined effects on model accuracy, attack resilience, communication cost, and trust-score evolution. Experiments were conducted on the MNIST dataset using label-flipping attacks under varying privacy budgets, sparsification ratios, and local optimization schedules.
-		
-		The results confirm the severe degradation in performance when combining \ac{DP-SGD} and FLTrust during full local-epoch training. However, reducing the number of local optimization steps substantially mitigates this effect and reveals a previously unreported dependence of model performance on the selected privacy budget. Furthermore, Top-$k$ sparsification was found to interact largely additively with FLTrust while exhibiting the expected super-additive degradation when combined with \ac{DP-SGD}. Finally, the temporal evolution of FLTrust trust scores was analyzed, providing additional insight into the behavior of honest and malicious clients throughout training.
-		
-		The presented framework and findings provide a foundation for further empirical studies on the privacy--robustness--performance trilemma in federated learning.
-		
+	Federated Learning (Federated Learning (FL) requires simultaneously addressing privacy, Byzantine robustness, and communication efficiency, forming a privacy--robustness--performance trilemma. This work empirically investigates the interactions among \ac{DP-SGD}, FLTrust aggregation, and Top-$k$ gradient sparsification. Using a modular experimental pipeline, we evaluate their isolated and combined effects on model accuracy, attack resilience, and communication overhead. Experiments were conducted on the MNIST dataset under label-flipping attacks, systematically varying privacy budgets, sparsification ratios, and local optimization schedules. Results indicate that combining \ac{DP-SGD} and FLTrust severely degrades performance during full local-epoch training. However, reducing local optimization steps substantially mitigates this degradation and reveals an unexpected dependence of model performance on the selected privacy budget. Furthermore, Top-$k$ sparsification interacts largely additively with FLTrust, while exhibiting super-additive degradation when combined with \ac{DP-SGD}. Finally, analyzing the temporal evolution of FLTrust trust scores provides critical insights into the behavioral divergence of honest and malicious clients throughout training.
 	\end{abstract}
 	
 	\tableofcontents
@@ -63,6 +53,8 @@
 		\acro{DP-SGD}{Differentially Private Stochastic Gradient Descent}
 		\acro{SGD}{Stochastic Gradient Descend}
 		\acro{DP}{Differential Privacy}
+		\acro{SMEA}{Smallest Maximum Eigenvalue Averaging}
+		\acro{CAF}{Covariance bound-Agnostic Filter}
 	\end{acronym}
 	
 	\placeholder{glossary}
@@ -81,7 +73,7 @@
 	
 	\subsection{Background and Motivation}
 	
-	In the past ten years, \ac{FL} has emerged as a framework for achieving distributed training without the need for data centralization. This is of particular interest when processing sensitive data, such as in healthcare or mobile applications. The local training allows to leave the data with the clients but opens new attack surfaces for model poisoning during training through the transmission of manipulated updates. Also, the transmitted gradients can still leak information about the used training data set. Additionally, gradient transmission at each round causes significant communication cost, especially for complex models.
+	In the past ten years, \ac{FL} has emerged as a framework for achieving distributed training without the need for data centralization. This is of particular interest when processing sensitive data, such as in healthcare or mobile applications. Local training allows clients to keep their data on-device but opens new attack surfaces for model poisoning during training through the transmission of manipulated updates. Also, the transmitted gradients can still leak information about the used training data set. Additionally, gradient transmission at each round causes significant communication cost, especially for complex models.
 	
 	In an effort to fortify the resilience of models and safeguard client privacy, numerous methodologies have been implemented in recent years. 
 	Robustness-enhancing methods are designed to detect malicious updates by assuming a significant deviation from the honest majority. 
@@ -94,7 +86,7 @@
 	Discarding unusual updates improves robustness against Byzantine adversaries but risks disregarding legitimate updates, particularly in settings where data is not \ac{IID}.
 	Compression techniques that reduce transmission load limit the information transmitted to the server and thus reduce model accuracy.
 	
-	In 2023, Allouah et al.~\cite{allouah2023trilemma} proved Theorem \ref{theorem:lowerBound}, stating that the combination of such methods yields a lower bound for the expected training error that exceeds the sum of the individual cost for robustness and privacy by a multiplicative term.
+	In 2023, Allouah et al.~\cite{allouah2023trilemma} proved Theorem~\ref{theorem:lowerBound}, stating that the combination of such methods yields a lower bound for the expected training error that exceeds the sum of the individual cost for robustness and privacy by a multiplicative term.
 	\begin{theorem}
 		Consider distributed mean estimation in $\mathbb{R}^d$ with $n$ users, of which an $\eta$-fraction may behave maliciously. Any algorithm, producing an estimate $\hat{\mu}$ of the true mean $\mu\in\mathbb{R}^d$ of inputs, and achieving $(\varepsilon,\delta)$-local \ac{DP} and robustness to $\eta$-corruption must incur an estimated error
 		\begin{equation}
@@ -120,9 +112,9 @@
 	\subsection{Contributions}
 	
 	\begin{itemize}
-		\item An open-source, end-to-end federated learning framework that integrates \ac{DP-SGD}, FLTrust, and Top-k sparsification in a modular architecture, facilitating reproducible experiments and future research on their interaction.
+		\item An open-source, end-to-end federated learning framework that integrates \ac{DP-SGD}, FLTrust, and Top-$k$ sparsification in a modular architecture, facilitating reproducible experiments and future research on their interaction.
 		
-		\item An empirical evaluation of the isolated and combined effects of \ac{DP-SGD}, FLTrust, and Top-k sparsification on model performance, robustness, and efficiency in federated learning.
+		\item An empirical evaluation of the isolated and combined effects of \ac{DP-SGD}, FLTrust, and Top-$k$ sparsification on model performance, robustness, and efficiency in federated learning.
 		
 		\item Experimental evidence that the interaction between \ac{DP-SGD} and FLTrust strongly depends on the local optimization schedule, showing that reducing the number of local optimization steps can substantially mitigate the performance degradation observed when combining both mechanisms.
 		
@@ -152,7 +144,7 @@
 	\section{Background}
 	\label{sec:background}
 	% --------------------------------------------------
-	This chapter summarizes the theoretical background of \ac{FL}, the trilemma axes and formalizes the Privacy-Robustness-Performance trilemma.
+	This section summarizes the theoretical background of \ac{FL}, the trilemma axes and formalizes the Privacy-Robustness-Performance trilemma.
 	\subsection{Federated Learning}
 	
 	Federated Learning is a machine learning framework comprising a central server and multiple distributed clients. Each client maintains a
@@ -163,7 +155,7 @@
 	the global update as a weighted average of the client-local model updates.
 	
 	\subsection{Privacy: \ac{DP}}
-	This chapter introduces the concepts of local and central \ac{DP} and describes the implementation of local \ac{DP} in \ac{DP-SGD}.
+	This section introduces the concepts of local and central \ac{DP} and describes the implementation of local \ac{DP} in \ac{DP-SGD}.
 	
 	\subsubsection{Definition and Composition}
 
@@ -189,7 +181,7 @@
 	
 	\paragraph{\ac{DP-SGD}.}
 	
-	\ac{DP-SGD} is a modification to the standard \ac{SGD} algorithm introduced by Abadi et al.~\cite{abadi2016deep} in 2016 to integrate local \ac{DP} into deep learning frameworks. It enhances \ac{SGD} by clipping the computed gradient to a fixed norm and adding calibrated (Gaussian) noise before performing an update step. The algorithm pseudocode as proposed by Abadi et al. is shown in figure \ref{fig:dpsgdpseudocode}.
+	\ac{DP-SGD} is a modification to the standard \ac{SGD} algorithm introduced by Abadi et al.~\cite{abadi2016deep} in 2016 to integrate local \ac{DP} into deep learning frameworks. It enhances \ac{SGD} by clipping the computed gradient to a fixed norm and adding calibrated (Gaussian) noise before performing an update step. The algorithm pseudocode as proposed by Abadi et al. is shown in Figure~\ref{fig:dpsgdpseudocode}.
 	
 	\begin{figure}
 		\includegraphics[width=\linewidth]{img/DP_SGD_pseudocode}
@@ -204,11 +196,7 @@
 	\paragraph{Byzantine Fault Model.}
 	Byzantine Fault Tolerance is a property of a distributed system that allows for the system to stay operational while some components fail or act maliciously.
 	
-	A $\eta$-fraction Byzantine adversary means that $\eta$\% of the clients are acting maliciously. In the conducted experiments, malicious behavior means communicating manipulated gradients to poison the central model, e.g. insert a backdoor, degrade the general performance or enable label flipping attacks.
-	
-	\paragraph{Krum.}
-	
-	Krum~\cite{Krum}, proposed by Blanchard et al. in 2017, enhances robustness to Byzantine adversaries by selecting updates closest to their XX neighbors, effectively focusing on the densest cluster of updates of size XX. This ensures the training process is provably Byzantine-tolerant but relies on the assumption that honest updates cluster together, which only holds when data distributions across clients are similar. Under data heterogeneity, this assumption breaks down, leading to performance degradation because honest updates may be discarded if they deviate significantly from the majority.
+	A $\eta$-fraction Byzantine adversary means that a fraction of $\eta$ of the clients are acting maliciously. In the conducted experiments, malicious behavior means communicating manipulated gradients to poison the central model, e.g. insert a backdoor, degrade the general performance or enable label flipping attacks.
 	
 	\paragraph{FLTrust.}
 	
@@ -228,16 +216,12 @@
 		
 	\paragraph{Theoretical Lower Bound.}
 	
-	Allouah et al.~\cite{allouah2023trilemma} proved that any algorithm simultaneously guaranteeing $\epsilon$-local DP and robustness against an $\eta$-fraction Byzantine adversary incurs a mean estimation error of at least
-	\begin{equation}
-	\Omega!\left(\frac{\eta}{\epsilon^2} + \frac{d}{\epsilon^2 n} + \eta G^2\right).
-	\label{lowerBoundTheory}
-	\end{equation}
+	Allouah et al.~\cite{allouah2023trilemma} proved that the mean training error for any algorithm simultaneously guaranteeing $\epsilon$-local DP and robustness against an $\eta$-fraction Byzantine adversary has a fixed lower bound as mentioned in Theorem~\ref{eq:trilemma_formula}.
 	This lower bound establishes that the costs of privacy and Byzantine robustness are fundamentally coupled. In particular, the cross-term $\eta/\epsilon^2$ shows that these costs interact multiplicatively rather than additively.
 	
 	\paragraph{Efficiency Axis Extension.}
 	
-	The same authors proposed the aggregation schemes SMEA and CAF, which match this theoretical lower bound. However, both methods incur a runtime complexity that scales cubically with the model dimension, rendering them impractical for large-scale models. Furthermore, the runtime of SMEA grows exponentially with the number of tolerated Byzantine adversaries, making it infeasible in realistic federated learning settings.
+	The same authors proposed the aggregation schemes \ac{SMEA} and \ac{CAF}, which match this theoretical lower bound. However, both methods incur a runtime complexity that scales cubically with the model dimension, rendering them impractical for large-scale models. Furthermore, the runtime of SMEA grows exponentially with the number of tolerated Byzantine adversaries, making it infeasible in realistic federated learning settings.
 	
 	The term $\frac{d}{\varepsilon^2 n}$ in Equation~\ref{lowerBoundTheory} further relates the model dimension $d$ to the communication cost and achievable estimation error. Consequently, maintaining accuracy for high-dimensional models requires either relaxing privacy guarantees or integrating a larger number of participating clients.
 	
@@ -251,7 +235,7 @@
 	\section{Threat Model and Metrics}
 	\label{sec:threat}
 	% --------------------------------------------------
-	This chapter maps out the assumed threat model and introduces the metrics used to evaluate the three axes.
+	This section maps out the assumed threat model and introduces the metrics used to evaluate the three axes.
 	
 	\subsection{Threat Model}
 	
@@ -268,7 +252,7 @@
 	
 	\paragraph{Robustness.}
 	
-	Robustness is evaluated by the the accuracy gap $\Delta_{acc}$ relative to a clean FedAvg baseline. The accuracy gap captures performance degradation caused by adversarial clients, providing a measure of resilience to Byzantine behavior.
+	Robustness is evaluated by the accuracy gap $\Delta_{acc}$ relative to a clean FedAvg baseline. The accuracy gap captures performance degradation caused by adversarial clients, providing a measure of resilience to Byzantine behavior.
 	
 	\paragraph{Efficiency.}
 
@@ -306,7 +290,7 @@
 	
 	The root dataset for the central server was obtained by randomly sampling a parametrized number of data points, uniformly distributed over all classes, from the training set.
 	
-	The trust score for weighting the local contributions is calculated as the cosine similarity to the update vector that was computed from the root data set as depicted in figure \ref{fig:fltrustupdate}.
+	The trust score for weighting the local contributions is calculated as the cosine similarity to the update vector that was computed from the root data set as depicted in Figure~\ref{fig:fltrustupdate}.
 	\begin{figure*}[h!]
 		\centering
 		\includegraphics[width=\textwidth]{img/fltrust_update}
@@ -325,7 +309,7 @@
 	In this section we outline the expected compounding effects.
 	
 	\paragraph{Performance.}
-	We hypothesize that the clipping and calibrated noise introduced by \ac{DP-SGD} impair the assignment of meaningful trust scores during FLTrust aggregation, thereby slowing convergence and reducing the final model accuracy beyond the individual cost of \ac{DP-SGD}. Furthermore, \ac{DP}-perturbed updates are expected to be more sensitive to Top-$k$ sparsification, as the added noise may increase the magnitude of gradient components that would otherwise be discarded. Consequently, combining multiple mechanisms is expected to incur a super-additive loss in accuracy.
+	We hypothesize that the clipping and calibrated noise introduced by \ac{DP-SGD} impair the assignment of meaningful trust scores during FLTrust aggregation, thereby slowing convergence and reducing the final model accuracy beyond the individual cost of \ac{DP-SGD}. Furthermore,we expect  \ac{DP}-perturbed updates to be more sensitive to Top-$k$ sparsification, as the added noise may increase the magnitude of gradient components that would otherwise be discarded. Consequently, we expect combinations of multiple mechanisms to incur a super-additive loss in accuracy.
 	
 	\paragraph{Efficiency.}
 	We expect the noise addition required for \ac{DP-SGD} to introduce a noticeable computational overhead on the client side, while FLTrust incurs a slight overhead on the server side. In contrast, Top-$k$ sparsification is not expected to reduce the overall training time in our experimental setup, as all clients are simulated on a single machine and communication latency is therefore negligible. However, the number of bytes transmitted per training round is expected to decrease proportionally to the sparsification ratio.
@@ -337,24 +321,24 @@
 	% --------------------------------------------------
 	
 	\subsection{Experimental Grid}
-	The experimental grid is described in table \ref{table:grid}.
+	The experimental grid is described in Table~\ref{table:grid}.
 	
 	\begin{table}[h]
 		\centering
 		\begin{tabular}{llll}
 			\hline
 			\rowcolor[HTML]{C0C0C0} 
-			\textbf{Identifier} & \ac{DP-SGD} & FLTrust & Top-k \\ \hline
+			\textbf{Identifier} & \ac{DP-SGD} & FLTrust & Top-$k$ \\ \hline
 			Base &  &  &  \\ \hline
 			\rowcolor[HTML]{EFEFEF} 
 			DP & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} &  &  \\ \hline
 			FLTrust &  & \multicolumn{1}{c}{x} &  \\ \hline
 			\rowcolor[HTML]{EFEFEF} 
-			TOPK &  &  & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} \\ \hline
+			Top-$k$ &  &  & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} \\ \hline
 			DP+FLTrust & \multicolumn{1}{c}{x} & \multicolumn{1}{c}{x} &  \\ \hline
 			\rowcolor[HTML]{EFEFEF} 
-			DP+TOPK & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} &  & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} \\ \hline
-			FLTrust+TOPK &  & \multicolumn{1}{c}{x} & \multicolumn{1}{c}{x} \\ \hline
+			DP+Top-$k$ & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} &  & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} \\ \hline
+			FLTrust+Top-$k$ &  & \multicolumn{1}{c}{x} & \multicolumn{1}{c}{x} \\ \hline
 			\rowcolor[HTML]{EFEFEF} 
 			ALL & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} & \multicolumn{1}{c}{\cellcolor[HTML]{EFEFEF}x} \\ \hline
 		\end{tabular}
@@ -363,11 +347,9 @@
 	\end{table}
 	
 
-	\subsection{Datasets}
+	\subsection{Dataset}
 
 	\paragraph{MNIST.} The MNIST dataset consists of 70,000 grayscale images of handwritten digits with a resolution of 28 × 28 pixels, each labelled with the corresponding digit in the range [0,9]. It is divided into a training set of 60,000 samples and a test set of 10,000 samples. Owing to its simplicity, the dataset is widely used to benchmark image classification models and verify their functionality before extending them to more complex datasets.
-	
-	\paragraph{CIFAR-10.} CIFAR-10 is a benchmark dataset for object classification comprising 60,000 RGB images with a resolution of 32 × 32 pixels, categorized into 10 classes. It is divided into 50,000 training samples and 10,000 test samples and is widely used for training and benchmarking object classification networks.
 	
 	\subsection{Learning and attack settings}
 
@@ -382,8 +364,8 @@
 
 	\begin{itemize}
 		\item The client learning rate is fixed at 0.01.
-		\item The number of gradient descend steps taken by each client per round is set to 10, due to the results of analyzing the effect on the model accuracy and evolution of the trust scores described in section~\ref{batches_per_round_trustscores}.
-		\item The initial seed for random processes is fixed to 42 to ensure comparability across runs. Randomizers required to vary between rounds, like training set shuffle or DP noise generation, additionally take the round number as input.
+		\item The number of gradient descent steps taken by each client per round is set to 10, based on the analysis in Section~\ref{batches_per_round_trustscores}.
+		\item The initial seed for random processes is fixed to 42 to ensure comparability across runs. Stochastic components required to vary between rounds, like training set shuffle or DP noise generation, additionally take the round number as input.
 		\item The attack type is fixed to flip the labels of digits 3 and 7 on the MNIST dataset.
 		\item \ac{DP} failure probability $\delta$ is fixed to 1e-5.
 		\item The root dataset size for FLTrust is fixed to 2000 samples. This is very large compared to the size of 100 samples proposed by the authors.
@@ -397,7 +379,7 @@
 		\item Byzantine fraction for label flipping attack
 		\item Attack scale for label flipping attack
 		\item \ac{DP} budget $\varepsilon \in [1;5;10]$
-		\item Top-K sparsification threshold $k \in [1\%;10\%;50\%]$
+		\item Top-$k$ sparsification threshold $k \in [1\%;10\%;50\%]$
 	\end{itemize}
 	\subsection{Software Stack}
 	
@@ -435,41 +417,48 @@
 	
 	\subsection{Isolation: Individual Mechanism Costs (RQ1)}
 	
-	This chapter analyzes the cost and effects of the isolated mechanisms compared to the baseline.
+	This section analyzes the cost and effects of the isolated mechanisms compared to the baseline.
 
 	\subsubsection{\ac{DP-SGD} Cost}
+	
+	
+	\begin{figure*}
+		\includegraphics[width=\textwidth]{img/MNIST_07-12/duration_per_config.png}
+		\caption{The average training duration per round for varying numbers of clients. Training run on MNIST dataset with 500 rounds of 10 SGD steps each, $n\in\{10,30,60\}, \eta=0.2$, attack scale = 2.0}
+		\label{fig:duration_by_client_number}
+	\end{figure*}
 	
 	\paragraph{Training time.}
 	The replacement of pure \ac{SGD} with \ac{DP-SGD} on the clients results in an increase in training time. This effect is stronger for stricter privacy budgets as depicted in Figure~\ref{fig:duration_by_client_number}.
 	
 	\paragraph{Final accuracy.}
-	Regarding the model performance, all conducted experiments report an accuracy loss of $\approx 0.2$ compared to the baseline (see Figures~\ref{fig:bars_acc_exp1} and \ref{fig:bars_accexp2}).
+	Regarding the model performance, all conducted experiments report an accuracy loss of $\approx 0.2$ compared to the baseline (see Figures~\ref{fig:bars_acc_exp1} and~\ref{fig:bars_accexp2}).
 	Contrary to our expectations, the assigned privacy budget does not have a major influence on the accuracy besides the general degradation observed when applying \ac{DP-SGD}: We achieve similar performance for all $\varepsilon \in [1;5;10;25]$. Figure~\ref{fig:DP_acc} shows a slight variation in the early rounds but overall a similar evolution for all values of $\varepsilon$.
 	
 	\subsubsection{FLTrust}
 
 	\paragraph{Effect.}
-	Enabling FLTrust improves model accuracy and mitigates the effects of the label-flipping attack, as shown in Figures~\ref{fig:confusion_matrix_base} and~\ref{fig:confusion_matrix_fltrust}. In the baseline model, the targeted digits 3 and 7 are consistently misclassified as each other, whereas enabling FLTrust largely restores correct predictions. The improvement becomes more pronounced with increasing Byzantine fractions and attack scales. The results shown were obtained with a Byzantine fraction of $\eta = 40\%$ and an attack scale of 2.0.
+	Enabling FLTrust improves model accuracy and mitigates the effects of the label-flipping attack, as shown in Figures~\ref{fig:confusion_matrix_base} and~\ref{fig:confusion_matrix_fltrust}. In the baseline model, the targeted digits 3 and 7 are consistently misclassified as each other, whereas enabling FLTrust largely restores correct predictions. The improvement becomes more pronounced with increasing Byzantine fractions and attack scales. The results shown were obtained with a Byzantine fraction of $\eta = 0.4$ and an attack scale of 2.0.
 	
 	A lower Byzantine fraction results in a better performance of the unprotected settings and therefore lowers the observable effect of FLTrust.
 	
 	\paragraph{Cost.}
-	The replacement of FedAvg aggregation with FLTrust did not yield a noticeable impact on the wall clock training time.
+	The replacement of FedAvg aggregation with FLTrust did not yield a noticeable impact on the wall clock training time (compare Figure~\ref{fig:duration_by_client_number}).
 
 	\subsubsection{Top-$k$ Sparsification}
 
 	\paragraph{Effect.}
-	Applying Top-k sparsification yields the expected savings in bandwidth, modeled here by measuring the bytes transferred per client per round. The results are visualized in Figure~\ref{fig:bytes_per_round}, confirming a reduction of $100-2k\%$. The factor of two comes from the necessity to transfer also the indices of the transferred bytes, rendering all $k\ge50$ impractical for saving bandwidth.
+	Applying Top-$k$ sparsification yields the expected savings in bandwidth, modeled here by measuring the bytes transferred per client per round. The results are visualized in Figure~\ref{fig:bytes_per_round}, confirming a reduction of $(100-2k)\%$. The factor of two comes from the necessity to transfer also the indices of the transferred bytes, rendering all $k\ge50$ impractical for saving bandwidth.
 	
-	\begin{figure}[h]
+	\begin{figure}
 		\centering
 		\includegraphics[width=\linewidth]{img/bytes_per_client.png}
-		\caption{Bytes transferred per client per round for settings with different Top-k sparsification thresholds.}
+		\caption{KB transferred per client per round for settings with different Top-$k$ sparsification thresholds.}
 		\label{fig:bytes_per_round}
 	\end{figure}
 	
 	\paragraph{Cost.}
-	We do not observe a significant decline in performance when applying Top-k sparsification to the MNIST training process. Cutting down to transferring only the top 1\% of the gradient yields a slight loss in accuracy, but not a noticeable effect.
+	We do not observe a significant decline in performance when applying Top-$k$ sparsification to the MNIST training process. Cutting down to transferring only the top 1\% of the gradient yields a slight loss in accuracy, but not a noticeable effect.
 	
 	One possible explanation for the minimal effect of the sparsification is that MNIST is a relatively simple dataset for which the classification depends on a very limited number of features.
 	
@@ -488,7 +477,7 @@
 	Contrary to our expectations, for the combination of FLTrust and \ac{DP}, stricter privacy guarantees ($\varepsilon=1$) led to even better accuracy than more relaxed ones ($\varepsilon=10$), resulting in accuracy gaps down to $\Delta_{acc}=0.05$ compared to the honest FedAvg setting.
 	
 	\paragraph{Influence of the $\varepsilon$ value.}
-	Although model performance varies slightly with $\varepsilon$, even the relaxed setting of $\varepsilon = 25$ does not achieve an accuracy above 0.2. The most pronounced effect is shown in Figure~\ref{fig:DP+FLTRUST_acc}, which illustrates the accuracy throughout training. While configurations with $\varepsilon \in {5,10,25}$ reach a peak accuracy of approximately 0.2 after 35, 25, and 15 training rounds, respectively, the configuration with $\varepsilon = 1$ never exceeds an accuracy of 0.12, indicating substantially slower convergence.
+	Although model performance varies slightly with $\varepsilon$, even the relaxed setting of $\varepsilon = 25$ does not achieve an accuracy above 0.2. The most pronounced effect is shown in Figure~\ref{fig:DP+FLTRUST_acc}, which illustrates the accuracy throughout training. While the configuration with $\varepsilon = 10$ reaches a peak accuracy of approximately 0.2 after 15 training rounds, the configuration with $\varepsilon = 1$ never exceeds an accuracy of 0.12, indicating substantially slower convergence.
 
 
 	
@@ -508,13 +497,20 @@
 	
 	Reducing the local training to 10 steps per communication round, however, produces markedly different results. The performance degradation previously observed for Top-1\% sparsification in the \ac{DP}+Top-$k$ configuration no longer occurs when FLTrust is added. Furthermore, the trend of stronger privacy guarantees yielding higher accuracy persists across all evaluated values of $k$. For a configuration with 60 clients, an accuracy of 88\% is achieved with a privacy budget of $\varepsilon = 1$ while transmitting only 1\% of the locally computed gradient components to the server.
 	
-	\subsection{Trust and Privacy: FlTrust scores (RQ3)}
+	\subsection{Trust and Privacy: FLTrust scores (RQ3)}
 	This section reports the findings related to the trust scores computed during the FLTrust aggregation.
 	
 	\paragraph{Development of trust scores.}
 	Figure~\ref{fig:trustscores_over_rounds} illustrates the evolution of the trust scores throughout training. The first chart, corresponding to the isolated FLTrust configuration, shows a clear separation between honest and malicious clients. Honest clients start with trust scores of approximately 0.9, which gradually decrease after roughly 15 rounds before stabilizing around 0.3. Malicious clients start near 0.7, exhibit a brief increase, and then decline sharply to 0 after approximately 25 training rounds.
 	
 	One possible explanation for the gradual decline in the trust scores of honest clients is that differences between the local training datasets become increasingly influential once the model has learned the general structure of the data. Consequently, honest updates remain broadly aligned with the root dataset but become progressively more diverse, whereas the poisoned and scaled updates of malicious clients deviate from the server update anchor and are therefore assigned trust scores close to zero.
+	
+		
+	\begin{figure*}[h]
+		\includegraphics[width=\textwidth]{img/MNIST_07-10/trust_over_rounds_per_config.png}
+		\caption{The line charts depict the average trust scores of honest and malicious clients during 50 rounds of full epochs trained, $n=50, \eta=0.4$, attack scale = 2.0. While for settings where \ac{DP} is enabled the scores are consistently equally low, the settings without \ac{DP}-related noise addition show a clear distinction.}
+		\label{fig:trustscores_over_rounds}
+	\end{figure*}
 	
 	\paragraph{Interaction of trust scores and batches processed per round.}
 	\label{batches_per_round_trustscores}
@@ -606,7 +602,7 @@
 	\paragraph{Broader Experimental Setup.}
 	Future work should extend the detailed analysis to CIFAR-10 and more challenging datasets that better reflect practical federated learning applications.
 	
-	Furthermore, the experimental setup should be expanded to encompass a broader range of aggregation methods, such as Krum, SMEA, and CAF, as well as stronger adversarial scenarios, including the model poisoning attacks proposed by Fang et al.~\cite{fang2020poisoning}. Exploring reparameterization techniques such as the Low-Rank Adaptation method proposed by Liu et al.~\cite{liu2025dplora} could further improve the understanding of the trade-offs between efficiency and privacy.
+	Furthermore, the experimental setup should be expanded to encompass a broader range of aggregation methods, such as Krum, SMEA, and CAF, as well as stronger adversarial scenarios, including the model poisoning attacks proposed by Fang et al.~\cite{fang2020poisoning}. Exploring reparameterization techniques such as differentially private LoRA, as explored by Liu et al..~\cite{liu2025dplora} could further improve the understanding of the trade-offs between efficiency and privacy.
 	
 	Finally, future work should investigate alternative threat models, including malicious servers and collusion between malicious clients and the server, as well as non-\ac{IID} data distributions through artificially skewed client datasets. Together, these extensions would provide a more comprehensive understanding of the privacy--robustness--performance trilemma and help determine whether the interactions observed in this work generalize to more realistic federated learning settings.
 	
@@ -633,7 +629,7 @@
 	\onecolumn
 	\section{APPENDIX}
 	\FloatBarrier
-	\subsection{Experimental run on MNIST dataset with 50 rounds of full epochs trained, $n=50, \eta=40\%$, attack scale = 2.0}
+	\subsection{Experimental run on MNIST dataset with 50 rounds of full epochs trained, $n=50, \eta=0.4$, attack scale = 2.0}
 	\FloatBarrier
 	
 	\begin{figure}[h]
@@ -683,13 +679,75 @@
 		\label{fig:DP+FLTRUST_acc}
 	\end{figure}
 	
-	\begin{figure}
-		\includegraphics[width=\textwidth]{img/MNIST_07-10/trust_over_rounds_per_config.png}
-		\caption{The line charts depict the average trust scores of honest and malicious clients during the training rounds. While for settings where \ac{DP} is enabled the scores are consistently equally low, the settings without \ac{DP}-related noise addition show a clear distinction.}
-		\label{fig:trustscores_over_rounds}
-	\end{figure}
-	\FloatBarrier
-	\subsection{Experimental run on MNIST dataset with 500 rounds of 10 SGD steps each, $n\in\{10,30,60\}, \eta=20\%$, attack scale = 2.0}
+	\begin{longtable}{@{}l c c c c c c c c c c@{}}
+		\toprule
+		\textbf{Configuration} & \textbf{Clients} & \textbf{$\varepsilon$} & \textbf{Top-$k$} & \textbf{kB/client} & \textbf{$\Delta$ Acc.} & \textbf{Final Acc.} & \textbf{$\mu_{\text{h}}$} & \textbf{$\sigma_{\text{h}}$} & \textbf{$\mu_{\text{m}}$} & \textbf{$\sigma_{\text{m}}$} \\
+		\midrule
+		\endfirsthead
+		\multicolumn{11}{c}{\tablename\ \thetable{} -- continued from previous page}\\
+		\toprule
+		\textbf{Configuration} & \textbf{Clients} & \textbf{$\varepsilon$} & \textbf{Top-$k$} & \textbf{kB/client} & \textbf{$\Delta$ Acc.} & \textbf{Final Acc.} & \textbf{$\mu_{\text{h}}$} & \textbf{$\sigma_{\text{h}}$} & \textbf{$\mu_{\text{m}}$} & \textbf{$\sigma_{\text{m}}$} \\
+		\midrule
+		\endhead
+		\midrule
+		\multicolumn{11}{r}{\textit{Continued on next page}}\\
+		\endfoot
+		\bottomrule
+		\multicolumn{11}{@{}p{16cm}@{}}{\footnotesize $\mu_{\text{h}}$/$\sigma_{\text{h}}$: mean/std of the trust score assigned to honest clients; $\mu_{\text{m}}$/$\sigma_{\text{m}}$: mean/std of the trust score assigned to malicious clients (FLTrust-based configurations only).}\\
+		\endlastfoot
+		\multirow{1}{*}{\textbf{BASE}} & 50 & -- & -- & 423.5 & -- & 0.7826 & -- & -- & -- & -- \\
+		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+		\multirow{4}{*}{\textbf{DP}} & 50 & 1 & -- & 423.5 & -- & 0.5728 & -- & -- & -- & -- \\
+		& 50 & 5 & -- & 423.5 & -- & 0.5825 & -- & -- & -- & -- \\
+		& 50 & 10 & -- & 423.5 & -- & 0.5750 & -- & -- & -- & -- \\
+		& 50 & 25 & -- & 423.5 & -- & 0.5747 & -- & -- & -- & -- \\
+		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+		\multirow{1}{*}{\textbf{FLTrust}} & 50 & -- & -- & 423.5 & -- & 0.9346 & 0.6183 & 0.2788 & 0.2378 & 0.3310 \\
+		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+		\multirow{3}{*}{\textbf{TopK}} & 50 & -- & 0.01 & 8.5 & -- & 0.7529 & -- & -- & -- & -- \\
+		& 50 & -- & 0.1 & 84.7 & -- & 0.7829 & -- & -- & -- & -- \\
+		& 50 & -- & 0.5 & 423.5 & -- & 0.7825 & -- & -- & -- & -- \\
+		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+		\multirow{4}{*}{\textbf{DP + FLTrust}} & 50 & 1 & -- & 423.5 & -- & 0.1170 & 0.0059 & 0.0031 & 0.0051 & 0.0030 \\
+		& 50 & 5 & -- & 423.5 & -- & 0.1694 & 0.0213 & 0.0042 & 0.0178 & 0.0043 \\
+		& 50 & 10 & -- & 423.5 & -- & 0.1407 & 0.0301 & 0.0052 & 0.0248 & 0.0055 \\
+		& 50 & 25 & -- & 423.5 & -- & 0.1314 & 0.0426 & 0.0066 & 0.0346 & 0.0071 \\
+		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+		\multirow{12}{*}{\textbf{DP + TopK}} & 50 & 1 & 0.01 & 8.5 & -- & 0.1032 & -- & -- & -- & -- \\
+		& 50 & 5 & 0.01 & 8.5 & -- & 0.1093 & -- & -- & -- & -- \\
+		& 50 & 10 & 0.01 & 8.5 & -- & 0.1055 & -- & -- & -- & -- \\
+		& 50 & 25 & 0.01 & 8.5 & -- & 0.1041 & -- & -- & -- & -- \\
+		& 50 & 1 & 0.1 & 84.7 & -- & 0.3913 & -- & -- & -- & -- \\
+		& 50 & 5 & 0.1 & 84.7 & -- & 0.3549 & -- & -- & -- & -- \\
+		& 50 & 10 & 0.1 & 84.7 & -- & 0.3647 & -- & -- & -- & -- \\
+		& 50 & 25 & 0.1 & 84.7 & -- & 0.3944 & -- & -- & -- & -- \\
+		& 50 & 1 & 0.5 & 423.5 & -- & 0.5684 & -- & -- & -- & -- \\
+		& 50 & 5 & 0.5 & 423.5 & -- & 0.5771 & -- & -- & -- & -- \\
+		& 50 & 10 & 0.5 & 423.5 & -- & 0.5705 & -- & -- & -- & -- \\
+		& 50 & 25 & 0.5 & 423.5 & -- & 0.5671 & -- & -- & -- & -- \\
+		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+		\multirow{3}{*}{\textbf{FLTrust + TopK}} & 50 & -- & 0.01 & 8.5 & -- & 0.8891 & 0.4659 & 0.2176 & 0.2063 & 0.2651 \\
+		& 50 & -- & 0.1 & 84.7 & -- & 0.9295 & 0.5866 & 0.2653 & 0.2266 & 0.3155 \\
+		& 50 & -- & 0.5 & 423.5 & -- & 0.9347 & 0.6181 & 0.2789 & 0.2377 & 0.3308 \\
+		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+		\multirow{12}{*}{\textbf{ALL}} & 50 & 1 & 0.01 & 8.5 & -- & 0.1076 & 0.0023 & 0.0024 & 0.0020 & 0.0023 \\
+		& 50 & 5 & 0.01 & 8.5 & -- & 0.1193 & 0.0070 & 0.0033 & 0.0059 & 0.0032 \\
+		& 50 & 10 & 0.01 & 8.5 & -- & 0.1584 & 0.0101 & 0.0035 & 0.0086 & 0.0035 \\
+		& 50 & 25 & 0.01 & 8.5 & -- & 0.1813 & 0.0147 & 0.0041 & 0.0125 & 0.0042 \\
+		& 50 & 1 & 0.1 & 84.7 & -- & 0.1110 & 0.0042 & 0.0028 & 0.0037 & 0.0028 \\
+		& 50 & 5 & 0.1 & 84.7 & -- & 0.1829 & 0.0149 & 0.0036 & 0.0125 & 0.0036 \\
+		& 50 & 10 & 0.1 & 84.7 & -- & 0.1658 & 0.0211 & 0.0043 & 0.0175 & 0.0044 \\
+		& 50 & 25 & 0.1 & 84.7 & -- & 0.1349 & 0.0295 & 0.0054 & 0.0243 & 0.0057 \\
+		& 50 & 1 & 0.5 & 423.5 & -- & 0.1158 & 0.0057 & 0.0030 & 0.0049 & 0.0030 \\
+		& 50 & 5 & 0.5 & 423.5 & -- & 0.1720 & 0.0206 & 0.0041 & 0.0172 & 0.0042 \\
+		& 50 & 10 & 0.5 & 423.5 & -- & 0.1421 & 0.0291 & 0.0051 & 0.0240 & 0.0054 \\
+		& 50 & 25 & 0.5 & 423.5 & -- & 0.1314 & 0.0411 & 0.0064 & 0.0335 & 0.0069 \\
+		\caption{Final and delta accuracy (relative to the no-attack BASE run), transferred payload per client per round, and per-round trust-score statistics (mean/std for honest and malicious clients, applicable only to FLTrust-based configurations) across all evaluated configurations. Unless noted otherwise, all runs use a Byzantine client fraction of $0.4$ and $50$ communication rounds.}
+		\label{tab:accuracy-summary_exp1}
+	\end{longtable}
+
+	\clearpage
+	\subsection{Experimental run on MNIST dataset with 500 rounds of 10 SGD steps each, $n\in\{10,30,60\}, \eta=0.2$, attack scale = 2.0}
 	
 	\begin{figure}[h]
 		\centering
@@ -697,12 +755,6 @@
 		\includegraphics[width=\textwidth]{img/MNIST_07-12/bar_accuracy_legend.png}
 		\caption{Final accuracy achieved on all different configurations.}
 		\label{fig:bars_accexp2}
-	\end{figure}
-	
-	\begin{figure}
-		\includegraphics[width=\linewidth]{img/MNIST_07-12/duration_per_config.png}
-		\caption{The average training duration per round for varying numbers of clients.}
-		\label{fig:duration_by_client_number}
 	\end{figure}
 	
 \begin{longtable}{@{}l c c c c c c c c c c@{}}
@@ -732,75 +784,166 @@
 	& 30 & 10 & -- & 423.5 & \textbf{0.1731} & \textbf{0.8063} & -- & -- & -- & -- \\
 	& 60 & 10 & -- & 423.5 & 0.1773 & 0.8020 & -- & -- & -- & -- \\
 	\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
-	\multirow{3}{*}{\textbf{FLTrust}} & 10 & -- & -- & 423.5 & 0.0055 & 0.9739 & -- & 0.1901 & 0.2035 & 0.0388 \\
-	& 30 & -- & -- & 423.5 & 0.0012 & 0.9782 & -- & 0.1630 & 0.1979 & 0.0378 \\
-	& 60 & -- & -- & 423.5 & \textbf{-0.0005} & \textbf{0.9798} & -- & 0.1581 & 0.1987 & 0.0378 \\
+	\multirow{3}{*}{\textbf{FLTrust}} & 10 & -- & -- & 423.5 & 0.0055 & 0.9739 & 0.1901 & 0.2035 & 0.0388 & 0.1321 \\
+	& 30 & -- & -- & 423.5 & 0.0012 & 0.9782 & 0.1630 & 0.1979 & 0.0378 & 0.1305 \\
+	& 60 & -- & -- & 423.5 & \textbf{-0.0005} & \textbf{0.9798} & 0.1581 & 0.1987 & 0.0378 & 0.1312 \\
 	\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
-	\multirow{9}{*}{\textbf{TopK}} & 10 & -- & 0.01 & 8.5 & 0.0785 & 0.9009 & 0.0100 & -- & -- & -- \\
-	& 30 & -- & 0.01 & 8.5 & 0.0802 & 0.8992 & 0.0100 & -- & -- & -- \\
-	& 60 & -- & 0.01 & 8.5 & 0.0594 & 0.9199 & 0.0100 & -- & -- & -- \\
-	& 10 & -- & 0.1 & 84.6 & 0.1490 & 0.8304 & 0.1000 & -- & -- & -- \\
-	& 30 & -- & 0.1 & 84.6 & 0.0859 & 0.8935 & 0.1000 & -- & -- & -- \\
-	& 60 & -- & 0.1 & 84.6 & 0.0701 & 0.9092 & 0.1000 & -- & -- & -- \\
-	& 10 & -- & 0.5 & 423.5 & 0.0913 & 0.8881 & 0.5000 & -- & -- & -- \\
-	& 30 & -- & 0.5 & 423.5 & 0.0324 & 0.9470 & 0.5000 & -- & -- & -- \\
-	& 60 & -- & 0.5 & 423.5 & 0.0009 & 0.9784 & 0.5000 & -- & -- & -- \\
+	\multirow{9}{*}{\textbf{TopK}} & 10 & -- & 0.01 & 8.5 & 0.0785 & 0.9009 & -- & -- & -- & -- \\
+	& 30 & -- & 0.01 & 8.5 & 0.0802 & 0.8992 & -- & -- & -- & -- \\
+	& 60 & -- & 0.01 & 8.5 & 0.0594 & 0.9199 & -- & -- & -- & -- \\
+	& 10 & -- & 0.1 & 84.7 & 0.1490 & 0.8304 & -- & -- & -- & -- \\
+	& 30 & -- & 0.1 & 84.7 & 0.0859 & 0.8935 & -- & -- & -- & -- \\
+	& 60 & -- & 0.1 & 84.7 & 0.0701 & 0.9092 & -- & -- & -- & -- \\
+	& 10 & -- & 0.5 & 423.5 & 0.0913 & 0.8881 & -- & -- & -- & -- \\
+	& 30 & -- & 0.5 & 423.5 & 0.0324 & 0.9470 & -- & -- & -- & -- \\
+	& 60 & -- & 0.5 & 423.5 & 0.0009 & 0.9784 & -- & -- & -- & -- \\
 	\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
-	\multirow{6}{*}{\textbf{DP + FLTrust}} & 10 & 1 & -- & 423.5 & 0.1022 & 0.8772 & -- & 0.0019 & 0.0022 & 0.0016 \\
-	& 30 & 1 & -- & 423.5 & 0.0624 & 0.9170 & -- & 0.0015 & 0.0020 & 0.0013 \\
-	& 60 & 1 & -- & 423.5 & 0.0458 & 0.9335 & -- & 0.0014 & 0.0019 & 0.0013 \\
-	& 10 & 10 & -- & 423.5 & 0.1627 & 0.8167 & -- & 0.0087 & 0.0061 & 0.0064 \\
-	& 30 & 10 & -- & 423.5 & 0.1439 & 0.8355 & -- & 0.0057 & 0.0044 & 0.0042 \\
-	& 60 & 10 & -- & 423.5 & 0.1216 & 0.8577 & -- & 0.0042 & 0.0036 & 0.0031 \\
+	\multirow{6}{*}{\textbf{DP + FLTrust}} & 10 & 1 & -- & 423.5 & 0.1022 & 0.8772 & 0.0019 & 0.0022 & 0.0016 & 0.0020 \\
+	& 30 & 1 & -- & 423.5 & 0.0624 & 0.9170 & 0.0015 & 0.0020 & 0.0013 & 0.0018 \\
+	& 60 & 1 & -- & 423.5 & 0.0458 & 0.9335 & 0.0014 & 0.0019 & 0.0013 & 0.0019 \\
+	& 10 & 10 & -- & 423.5 & 0.1627 & 0.8167 & 0.0087 & 0.0061 & 0.0064 & 0.0053 \\
+	& 30 & 10 & -- & 423.5 & 0.1439 & 0.8355 & 0.0057 & 0.0044 & 0.0042 & 0.0039 \\
+	& 60 & 10 & -- & 423.5 & 0.1216 & 0.8577 & 0.0042 & 0.0036 & 0.0031 & 0.0032 \\
 	\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
-	\multirow{18}{*}{\textbf{DP + TopK}} & 10 & 1 & 0.01 & 8.5 & 0.7768 & 0.2026 & 0.0100 & -- & -- & -- \\
-	& 30 & 1 & 0.01 & 8.5 & 0.7490 & 0.2304 & 0.0100 & -- & -- & -- \\
-	& 60 & 1 & 0.01 & 8.5 & 0.7121 & 0.2672 & 0.0100 & -- & -- & -- \\
-	& 10 & 10 & 0.01 & 8.5 & 0.7689 & 0.2105 & 0.0100 & -- & -- & -- \\
-	& 30 & 10 & 0.01 & 8.5 & 0.7912 & 0.1882 & 0.0100 & -- & -- & -- \\
-	& 60 & 10 & 0.01 & 8.5 & 0.8113 & 0.1680 & 0.0100 & -- & -- & -- \\
-	& 10 & 1 & 0.1 & 84.6 & 0.3513 & 0.6281 & 0.1000 & -- & -- & -- \\
-	& 30 & 1 & 0.1 & 84.6 & 0.3451 & 0.6343 & 0.1000 & -- & -- & -- \\
-	& 60 & 1 & 0.1 & 84.6 & 0.3529 & 0.6264 & 0.1000 & -- & -- & -- \\
-	& 10 & 10 & 0.1 & 84.6 & 0.3043 & 0.6751 & 0.1000 & -- & -- & -- \\
-	& 30 & 10 & 0.1 & 84.6 & 0.3041 & 0.6753 & 0.1000 & -- & -- & -- \\
-	& 60 & 10 & 0.1 & 84.6 & 0.2991 & 0.6802 & 0.1000 & -- & -- & -- \\
-	& 10 & 1 & 0.5 & 423.5 & 0.2118 & 0.7676 & 0.5000 & -- & -- & -- \\
-	& 30 & 1 & 0.5 & 423.5 & 0.2055 & 0.7739 & 0.5000 & -- & -- & -- \\
-	& 60 & 1 & 0.5 & 423.5 & 0.2067 & 0.7726 & 0.5000 & -- & -- & -- \\
-	& 10 & 10 & 0.5 & 423.5 & 0.1914 & 0.7880 & 0.5000 & -- & -- & -- \\
-	& 30 & 10 & 0.5 & 423.5 & 0.1779 & 0.8015 & 0.5000 & -- & -- & -- \\
-	& 60 & 10 & 0.5 & 423.5 & 0.1838 & 0.7955 & 0.5000 & -- & -- & -- \\
+	\multirow{18}{*}{\textbf{DP + TopK}} & 10 & 1 & 0.01 & 8.5 & 0.7768 & 0.2026 & -- & -- & -- & -- \\
+	& 30 & 1 & 0.01 & 8.5 & 0.7490 & 0.2304 & -- & -- & -- & -- \\
+	& 60 & 1 & 0.01 & 8.5 & 0.7121 & 0.2672 & -- & -- & -- & -- \\
+	& 10 & 10 & 0.01 & 8.5 & 0.7689 & 0.2105 & -- & -- & -- & -- \\
+	& 30 & 10 & 0.01 & 8.5 & 0.7912 & 0.1882 & -- & -- & -- & -- \\
+	& 60 & 10 & 0.01 & 8.5 & 0.8113 & 0.1680 & -- & -- & -- & -- \\
+	& 10 & 1 & 0.1 & 84.7 & 0.3513 & 0.6281 & -- & -- & -- & -- \\
+	& 30 & 1 & 0.1 & 84.7 & 0.3451 & 0.6343 & -- & -- & -- & -- \\
+	& 60 & 1 & 0.1 & 84.7 & 0.3529 & 0.6264 & -- & -- & -- & -- \\
+	& 10 & 10 & 0.1 & 84.7 & 0.3043 & 0.6751 & -- & -- & -- & -- \\
+	& 30 & 10 & 0.1 & 84.7 & 0.3041 & 0.6753 & -- & -- & -- & -- \\
+	& 60 & 10 & 0.1 & 84.7 & 0.2991 & 0.6802 & -- & -- & -- & -- \\
+	& 10 & 1 & 0.5 & 423.5 & 0.2118 & 0.7676 & -- & -- & -- & -- \\
+	& 30 & 1 & 0.5 & 423.5 & 0.2055 & 0.7739 & -- & -- & -- & -- \\
+	& 60 & 1 & 0.5 & 423.5 & 0.2067 & 0.7726 & -- & -- & -- & -- \\
+	& 10 & 10 & 0.5 & 423.5 & 0.1914 & 0.7880 & -- & -- & -- & -- \\
+	& 30 & 10 & 0.5 & 423.5 & 0.1779 & 0.8015 & -- & -- & -- & -- \\
+	& 60 & 10 & 0.5 & 423.5 & 0.1838 & 0.7955 & -- & -- & -- & -- \\
 	\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
-	\multirow{9}{*}{\textbf{FLTrust + TopK}} & 10 & -- & 0.01 & 8.5 & 0.0510 & 0.9284 & 0.0100 & 0.1655 & 0.1667 & 0.0489 \\
-	& 30 & -- & 0.01 & 8.5 & 0.0500 & 0.9294 & 0.0100 & 0.1508 & 0.1687 & 0.0488 \\
-	& 60 & -- & 0.01 & 8.5 & 0.0480 & 0.9313 & 0.0100 & 0.1474 & 0.1707 & 0.0477 \\
-	& 10 & -- & 0.1 & 84.6 & 0.0065 & 0.9729 & 0.1000 & 0.1808 & 0.1954 & 0.0405 \\
-	& 30 & -- & 0.1 & 84.6 & 0.0053 & 0.9741 & 0.1000 & 0.1608 & 0.1942 & 0.0396 \\
-	& 60 & -- & 0.1 & 84.6 & 0.0040 & 0.9753 & 0.1000 & 0.1577 & 0.1959 & 0.0398 \\
-	& 10 & -- & 0.5 & 423.5 & 0.0054 & 0.9740 & 0.5000 & 0.1932 & 0.2055 & 0.0388 \\
-	& 30 & -- & 0.5 & 423.5 & 0.0011 & 0.9783 & 0.5000 & 0.1635 & 0.1982 & 0.0378 \\
-	& 60 & -- & 0.5 & 423.5 & -0.0004 & 0.9797 & 0.5000 & 0.1574 & 0.1984 & 0.0377 \\
+	\multirow{9}{*}{\textbf{FLTrust + TopK}} & 10 & -- & 0.01 & 8.5 & 0.0510 & 0.9284 & 0.1655 & 0.1667 & 0.0489 & 0.1242 \\
+	& 30 & -- & 0.01 & 8.5 & 0.0500 & 0.9294 & 0.1508 & 0.1687 & 0.0488 & 0.1268 \\
+	& 60 & -- & 0.01 & 8.5 & 0.0480 & 0.9313 & 0.1474 & 0.1707 & 0.0477 & 0.1266 \\
+	& 10 & -- & 0.1 & 84.7 & 0.0065 & 0.9729 & 0.1808 & 0.1954 & 0.0405 & 0.1292 \\
+	& 30 & -- & 0.1 & 84.7 & 0.0053 & 0.9741 & 0.1608 & 0.1942 & 0.0396 & 0.1292 \\
+	& 60 & -- & 0.1 & 84.7 & 0.0040 & 0.9753 & 0.1577 & 0.1959 & 0.0398 & 0.1308 \\
+	& 10 & -- & 0.5 & 423.5 & 0.0054 & 0.9740 & 0.1932 & 0.2055 & 0.0388 & 0.1320 \\
+	& 30 & -- & 0.5 & 423.5 & 0.0011 & 0.9783 & 0.1635 & 0.1982 & 0.0378 & 0.1303 \\
+	& 60 & -- & 0.5 & 423.5 & -0.0004 & 0.9797 & 0.1574 & 0.1984 & 0.0377 & 0.1310 \\
 	\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
-	\multirow{18}{*}{\textbf{ALL}} & 10 & 1 & 0.01 & 8.5 & 0.3330 & 0.6464 & 0.0100 & 0.0016 & 0.0020 & 0.0015 \\
-	& 30 & 1 & 0.01 & 8.5 & 0.1729 & 0.8065 & 0.0100 & 0.0014 & 0.0019 & 0.0013 \\
-	& 60 & 1 & 0.01 & 8.5 & 0.0962 & 0.8831 & 0.0100 & 0.0013 & 0.0019 & 0.0013 \\
-	& 10 & 10 & 0.01 & 8.5 & 0.6017 & 0.3777 & 0.0100 & 0.0033 & 0.0028 & 0.0029 \\
-	& 30 & 10 & 0.01 & 8.5 & 0.5454 & 0.4340 & 0.0100 & 0.0026 & 0.0025 & 0.0023 \\
-	& 60 & 10 & 0.01 & 8.5 & 0.4603 & 0.5190 & 0.0100 & 0.0022 & 0.0024 & 0.0020 \\
-	& 10 & 1 & 0.1 & 84.6 & 0.1195 & 0.8599 & 0.1000 & 0.0019 & 0.0022 & 0.0016 \\
-	& 30 & 1 & 0.1 & 84.6 & 0.0802 & 0.8992 & 0.1000 & 0.0015 & 0.0020 & 0.0013 \\
-	& 60 & 1 & 0.1 & 84.6 & 0.0556 & 0.9237 & 0.1000 & 0.0013 & 0.0018 & 0.0013 \\
-	& 10 & 10 & 0.1 & 84.6 & 0.2817 & 0.6977 & 0.1000 & 0.0088 & 0.0038 & 0.0068 \\
-	& 30 & 10 & 0.1 & 84.6 & 0.2627 & 0.7167 & 0.1000 & 0.0057 & 0.0032 & 0.0044 \\
-	& 60 & 10 & 0.1 & 84.6 & 0.2285 & 0.7508 & 0.1000 & 0.0043 & 0.0030 & 0.0033 \\
-	& 10 & 1 & 0.5 & 423.5 & 0.1026 & 0.8768 & 0.5000 & 0.0019 & 0.0022 & 0.0015 \\
-	& 30 & 1 & 0.5 & 423.5 & 0.0670 & 0.9124 & 0.5000 & 0.0015 & 0.0019 & 0.0013 \\
-	& 60 & 1 & 0.5 & 423.5 & 0.0453 & 0.9340 & 0.5000 & 0.0014 & 0.0019 & 0.0013 \\
-	& 10 & 10 & 0.5 & 423.5 & 0.1681 & 0.8113 & 0.5000 & 0.0088 & 0.0058 & 0.0066 \\
-	& 30 & 10 & 0.5 & 423.5 & 0.1485 & 0.8309 & 0.5000 & 0.0058 & 0.0043 & 0.0043 \\
-	& 60 & 10 & 0.5 & 423.5 & 0.1312 & 0.8481 & 0.5000 & 0.0043 & 0.0035 & 0.0032 \\
+	\multirow{18}{*}{\textbf{ALL}} & 10 & 1 & 0.01 & 8.5 & 0.3330 & 0.6464 & 0.0016 & 0.0020 & 0.0015 & 0.0019 \\
+	& 30 & 1 & 0.01 & 8.5 & 0.1729 & 0.8065 & 0.0014 & 0.0019 & 0.0013 & 0.0019 \\
+	& 60 & 1 & 0.01 & 8.5 & 0.0962 & 0.8831 & 0.0013 & 0.0019 & 0.0013 & 0.0018 \\
+	& 10 & 10 & 0.01 & 8.5 & 0.6017 & 0.3777 & 0.0033 & 0.0028 & 0.0029 & 0.0026 \\
+	& 30 & 10 & 0.01 & 8.5 & 0.5454 & 0.4340 & 0.0026 & 0.0025 & 0.0023 & 0.0024 \\
+	& 60 & 10 & 0.01 & 8.5 & 0.4603 & 0.5190 & 0.0022 & 0.0024 & 0.0020 & 0.0022 \\
+	& 10 & 1 & 0.1 & 84.7 & 0.1195 & 0.8599 & 0.0019 & 0.0022 & 0.0016 & 0.0020 \\
+	& 30 & 1 & 0.1 & 84.7 & 0.0802 & 0.8992 & 0.0015 & 0.0020 & 0.0013 & 0.0018 \\
+	& 60 & 1 & 0.1 & 84.7 & 0.0556 & 0.9237 & 0.0013 & 0.0018 & 0.0013 & 0.0018 \\
+	& 10 & 10 & 0.1 & 84.7 & 0.2817 & 0.6977 & 0.0088 & 0.0038 & 0.0068 & 0.0035 \\
+	& 30 & 10 & 0.1 & 84.7 & 0.2627 & 0.7167 & 0.0057 & 0.0032 & 0.0044 & 0.0030 \\
+	& 60 & 10 & 0.1 & 84.7 & 0.2285 & 0.7508 & 0.0043 & 0.0030 & 0.0033 & 0.0028 \\
+	& 10 & 1 & 0.5 & 423.5 & 0.1026 & 0.8768 & 0.0019 & 0.0022 & 0.0015 & 0.0020 \\
+	& 30 & 1 & 0.5 & 423.5 & 0.0670 & 0.9124 & 0.0015 & 0.0019 & 0.0013 & 0.0018 \\
+	& 60 & 1 & 0.5 & 423.5 & 0.0453 & 0.9340 & 0.0014 & 0.0019 & 0.0013 & 0.0018 \\
+	& 10 & 10 & 0.5 & 423.5 & 0.1681 & 0.8113 & 0.0088 & 0.0058 & 0.0066 & 0.0051 \\
+	& 30 & 10 & 0.5 & 423.5 & 0.1485 & 0.8309 & 0.0058 & 0.0043 & 0.0043 & 0.0038 \\
+	& 60 & 10 & 0.5 & 423.5 & 0.1312 & 0.8481 & 0.0043 & 0.0035 & 0.0032 & 0.0031 \\
 	\caption{Final and delta accuracy (relative to the no-attack BASE run), transferred payload per client per round, and per-round trust-score statistics (mean/std for honest and malicious clients, applicable only to FLTrust-based configurations) across all evaluated configurations. Unless noted otherwise, all runs use $R_\ell=10$ local epochs, a Byzantine client fraction of $0.2$, and $500$ communication rounds.}
-\label{tab:accuracy-summary}
+	\label{tab:accuracy-summary_exp2}
+\end{longtable}
+\clearpage
+\subsection{Experimental run on MNIST dataset with 500 rounds of 10 SGD steps each, $n\in\{10,30,60\}, \eta=0.4$, attack scale = 2.0}
+
+	\begin{figure}[h]
+	\centering
+	\includegraphics[width=\textwidth]{img/MNIST_07-14/bar_accuracy.png}
+	\includegraphics[width=\textwidth]{img/MNIST_07-14/bar_accuracy_legend.png}
+	\caption{Final accuracy achieved on all different configurations.}
+	\label{fig:bars_accexp3}
+\end{figure}
+
+\begin{longtable}{@{}l c c c c c c c c c c@{}}
+	\toprule
+	\textbf{Configuration} & \textbf{Clients} & \textbf{$\varepsilon$} & \textbf{Top-$k$} & \textbf{kB/client} & \textbf{$\Delta$ Acc.} & \textbf{Final Acc.} & \textbf{$\mu_{\text{h}}$} & \textbf{$\sigma_{\text{h}}$} & \textbf{$\mu_{\text{m}}$} & \textbf{$\sigma_{\text{m}}$} \\
+	\midrule
+	\endfirsthead
+	\multicolumn{11}{c}{\tablename\ \thetable{} -- continued from previous page}\\
+	\toprule
+	\textbf{Configuration} & \textbf{Clients} & \textbf{$\varepsilon$} & \textbf{Top-$k$} & \textbf{kB/client} & \textbf{$\Delta$ Acc.} & \textbf{Final Acc.} & \textbf{$\mu_{\text{h}}$} & \textbf{$\sigma_{\text{h}}$} & \textbf{$\mu_{\text{m}}$} & \textbf{$\sigma_{\text{m}}$} \\
+	\midrule
+	\endhead
+	\midrule
+	\multicolumn{11}{r}{\textit{Continued on next page}}\\
+	\endfoot
+	\bottomrule
+	\multicolumn{11}{@{}p{16cm}@{}}{\footnotesize $\mu_{\text{h}}$/$\sigma_{\text{h}}$: mean/std of the trust score assigned to honest clients; $\mu_{\text{m}}$/$\sigma_{\text{m}}$: mean/std of the trust score assigned to malicious clients (FLTrust-based configurations only).}\\
+	\endlastfoot
+	\multirow{3}{*}{\textbf{BASE}} & 10 & -- & -- & 423.5 & \textbf{0.1053} & \textbf{0.8741} & -- & -- & -- & -- \\
+	& 30 & -- & -- & 423.5 & 0.1857 & 0.7937 & -- & -- & -- & -- \\
+	& 60 & -- & -- & 423.5 & 0.1913 & 0.7880 & -- & -- & -- & -- \\
+	\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+	\multirow{6}{*}{\textbf{DP}} & 10 & 1 & -- & 423.5 & 0.3690 & 0.6104 & -- & -- & -- & -- \\
+	& 30 & 1 & -- & 423.5 & \textbf{0.3616} & \textbf{0.6178} & -- & -- & -- & -- \\
+	& 60 & 1 & -- & 423.5 & 0.3684 & 0.6109 & -- & -- & -- & -- \\
+	& 10 & 10 & -- & 423.5 & 0.3899 & 0.5895 & -- & -- & -- & -- \\
+	& 30 & 10 & -- & 423.5 & 0.3808 & 0.5986 & -- & -- & -- & -- \\
+	& 60 & 10 & -- & 423.5 & 0.3808 & 0.5985 & -- & -- & -- & -- \\
+	\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+	\multirow{3}{*}{\textbf{FLTrust}} & 10 & -- & -- & 423.5 & 0.0143 & 0.9651 & 0.2611 & 0.2303 & 0.0677 & 0.1784 \\
+	& 30 & -- & -- & 423.5 & \textbf{0.0138} & \textbf{0.9656} & 0.2277 & 0.2318 & 0.0653 & 0.1758 \\
+	& 60 & -- & -- & 423.5 & 0.0144 & 0.9649 & 0.2236 & 0.2343 & 0.0659 & 0.1777 \\
+	\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+	\multirow{6}{*}{\textbf{TopK}} & 10 & -- & 0.01 & 8.5 & 0.2040 & 0.7754 & -- & -- & -- & -- \\
+	& 30 & -- & 0.01 & 8.5 & 0.2141 & 0.7653 & -- & -- & -- & -- \\
+	& 60 & -- & 0.01 & 8.5 & 0.2199 & 0.7594 & -- & -- & -- & -- \\
+	& 10 & -- & 0.1 & 84.7 & 0.1184 & 0.8610 & -- & -- & -- & -- \\
+	& 30 & -- & 0.1 & 84.7 & 0.1882 & 0.7912 & -- & -- & -- & -- \\
+	& 60 & -- & 0.1 & 84.7 & 0.1946 & 0.7847 & -- & -- & -- & -- \\
+	\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+	\multirow{6}{*}{\textbf{DP + FLTrust}} & 10 & 1 & -- & 423.5 & 0.1843 & 0.7951 & 0.0029 & 0.0026 & 0.0023 & 0.0024 \\
+	& 30 & 1 & -- & 423.5 & 0.1040 & 0.8754 & 0.0020 & 0.0022 & 0.0016 & 0.0020 \\
+	& 60 & 1 & -- & 423.5 & 0.0770 & 0.9023 & 0.0016 & 0.0020 & 0.0014 & 0.0019 \\
+	& 10 & 10 & -- & 423.5 & 0.3113 & 0.6681 & 0.0151 & 0.0051 & 0.0122 & 0.0051 \\
+	& 30 & 10 & -- & 423.5 & 0.2923 & 0.6871 & 0.0106 & 0.0042 & 0.0085 & 0.0043 \\
+	& 60 & 10 & -- & 423.5 & 0.2571 & 0.7222 & 0.0080 & 0.0037 & 0.0062 & 0.0037 \\
+	\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+	\multirow{12}{*}{\textbf{DP + TopK}} & 10 & 1 & 0.01 & 8.5 & 0.7214 & 0.2580 & -- & -- & -- & -- \\
+	& 30 & 1 & 0.01 & 8.5 & 0.8415 & 0.1379 & -- & -- & -- & -- \\
+	& 60 & 1 & 0.01 & 8.5 & 0.8744 & 0.1049 & -- & -- & -- & -- \\
+	& 10 & 10 & 0.01 & 8.5 & 0.8667 & 0.1127 & -- & -- & -- & -- \\
+	& 30 & 10 & 0.01 & 8.5 & 0.8757 & 0.1037 & -- & -- & -- & -- \\
+	& 60 & 10 & 0.01 & 8.5 & 0.8759 & 0.1034 & -- & -- & -- & -- \\
+	& 10 & 1 & 0.1 & 84.7 & 0.5023 & 0.4771 & -- & -- & -- & -- \\
+	& 30 & 1 & 0.1 & 84.7 & 0.4745 & 0.5049 & -- & -- & -- & -- \\
+	& 60 & 1 & 0.1 & 84.7 & 0.4915 & 0.4878 & -- & -- & -- & -- \\
+	& 10 & 10 & 0.1 & 84.7 & 0.4576 & 0.5218 & -- & -- & -- & -- \\
+	& 30 & 10 & 0.1 & 84.7 & 0.4800 & 0.4994 & -- & -- & -- & -- \\
+	& 60 & 10 & 0.1 & 84.7 & 0.4930 & 0.4863 & -- & -- & -- & -- \\
+	\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+	\multirow{6}{*}{\textbf{FLTrust + TopK}} & 10 & -- & 0.01 & 8.5 & 0.0872 & 0.8922 & 0.2320 & 0.1853 & 0.0867 & 0.1678 \\
+	& 30 & -- & 0.01 & 8.5 & 0.0812 & 0.8982 & 0.2117 & 0.1884 & 0.0846 & 0.1680 \\
+	& 60 & -- & 0.01 & 8.5 & 0.0786 & 0.9007 & 0.2031 & 0.1917 & 0.0841 & 0.1691 \\
+	& 10 & -- & 0.1 & 84.7 & 0.0219 & 0.9575 & 0.2514 & 0.2217 & 0.0689 & 0.1748 \\
+	& 30 & -- & 0.1 & 84.7 & 0.0210 & 0.9584 & 0.2178 & 0.2232 & 0.0683 & 0.1740 \\
+	& 60 & -- & 0.1 & 84.7 & 0.0211 & 0.9582 & 0.2175 & 0.2266 & 0.0686 & 0.1758 \\
+	\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+	\multirow{12}{*}{\textbf{ALL}} & 10 & 1 & 0.01 & 8.5 & 0.4591 & 0.5203 & 0.0018 & 0.0021 & 0.0015 & 0.0019 \\
+	& 30 & 1 & 0.01 & 8.5 & 0.3376 & 0.6418 & 0.0015 & 0.0019 & 0.0014 & 0.0019 \\
+	& 60 & 1 & 0.01 & 8.5 & 0.2796 & 0.6997 & 0.0014 & 0.0019 & 0.0014 & 0.0019 \\
+	& 10 & 10 & 0.01 & 8.5 & 0.6940 & 0.2854 & 0.0038 & 0.0030 & 0.0033 & 0.0028 \\
+	& 30 & 10 & 0.01 & 8.5 & 0.6797 & 0.2997 & 0.0029 & 0.0026 & 0.0026 & 0.0026 \\
+	& 60 & 10 & 0.01 & 8.5 & 0.6527 & 0.3266 & 0.0025 & 0.0025 & 0.0022 & 0.0024 \\
+	& 10 & 1 & 0.1 & 84.7 & 0.2811 & 0.6983 & 0.0026 & 0.0024 & 0.0022 & 0.0024 \\
+	& 30 & 1 & 0.1 & 84.7 & 0.1812 & 0.7982 & 0.0018 & 0.0021 & 0.0016 & 0.0020 \\
+	& 60 & 1 & 0.1 & 84.7 & 0.1124 & 0.8669 & 0.0016 & 0.0020 & 0.0014 & 0.0019 \\
+	& 10 & 10 & 0.1 & 84.7 & 0.4015 & 0.5779 & 0.0099 & 0.0042 & 0.0082 & 0.0042 \\
+	& 30 & 10 & 0.1 & 84.7 & 0.4184 & 0.5610 & 0.0070 & 0.0036 & 0.0059 & 0.0035 \\
+	& 60 & 10 & 0.1 & 84.7 & 0.3794 & 0.5999 & 0.0055 & 0.0033 & 0.0046 & 0.0031 \\
+	\caption{Final and delta accuracy (relative to the no-attack BASE run), transferred payload per client per round, and per-round trust-score statistics (mean/std for honest and malicious clients, applicable only to FLTrust-based configurations) across all evaluated configurations. Unless noted otherwise, all runs use $R_\ell=10$ local epochs, a Byzantine client fraction of $0.4$, and $250$ communication rounds.}
+	\label{tab:accuracy-summary_exp3}
 \end{longtable}
 \end{document}
