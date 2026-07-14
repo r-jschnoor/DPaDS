@@ -20,6 +20,10 @@
 \usepackage{placeins}
 \usepackage{tabularx}
 \usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{longtable}
+\usepackage[table]{xcolor}
+\usepackage{booktabs}
 \usepackage[table,xcdraw]{xcolor}
 \pgfplotsset{compat=1.18}
 \usepackage[printonlyused]{acronym}
@@ -259,9 +263,9 @@
 	
 	Robustness is evaluated by the the accuracy gap $\Delta_{acc}$ relative to a clean FedAvg baseline. The accuracy gap captures performance degradation caused by adversarial clients, providing a measure of resilience to Byzantine behavior.
 	
-	\paragraph{Performance.}
+	\paragraph{Efficiency.}
 
-	The performance metric includes communication cost (bytes sent per client per round), and wall-clock training time. These metrics collectively assess the trade-off between resource efficiency, and computational feasibility in decentralized learning systems.
+	The efficiency metric includes communication cost (bytes sent per client per round), and wall-clock training time. These metrics collectively assess the trade-off between resource efficiency, and computational feasibility in decentralized learning systems.
 	
 	\subsection{Trilemma Visualization}
 	
@@ -303,7 +307,7 @@
 		\label{fig:fltrustupdate}
 	\end{figure*}
 	
-	\subsection{Performance Mechanism: Top-$k$ Sparsification}
+	\subsection{Efficiency Mechanism: Top-$k$ Sparsification}
 	
 	Top-$k$ sparsification is implemented as a custom client-side wrapper that retains only the $k\%$ gradient components with the largest magnitude, where $k \in {1,10,50}$, and transmits their corresponding indices alongside the retained values. Consequently, the number of transmitted bytes is not reduced exactly to $k\%$ of the original update size because the component indices must also be communicated. Nevertheless, a substantial reduction in communication volume is expected, particularly for small values of $k$.
 
@@ -440,6 +444,8 @@
 	\paragraph{Effect.}
 	Enabling FLTrust improves model accuracy and mitigates the effects of the label-flipping attack, as shown in Figures~\ref{fig:confusion_matrix_base} and~\ref{fig:confusion_matrix_fltrust}. In the baseline model, the targeted digits 3 and 7 are consistently misclassified as each other, whereas enabling FLTrust largely restores correct predictions. The improvement becomes more pronounced with increasing Byzantine fractions and attack scales. The results shown were obtained with a Byzantine fraction of $\eta = 40\%$ and an attack scale of 2.0.
 	
+	A lower Byzantine fraction results in a better performance of the unprotected settings and therefore lowers the observable effect of FLTrust.
+	
 	\paragraph{Cost.}
 	The replacement of FedAvg aggregation with FLTrust did not yield a noticeable impact on the wall clock training time.
 
@@ -463,7 +469,7 @@
 	\subsection{Combination: Pairwise and Full Interactions (RQ2)}
 	
 	This section reports the combinatory effects observed when pairing multiple mechanisms.
-	The full results are available in table TODO
+	The full results are available in Table~\ref{tab:accuracy-summary}.
 	\subsubsection{\ac{DP} + Robustness}
 	
 	\paragraph{Cost.}
@@ -691,4 +697,102 @@
 		\caption{The average training duration per round for varying numbers of clients.}
 		\label{fig:duration_by_client_number}
 	\end{figure}
+	
+	\begin{longtable}{@{}l c c c c c@{}}
+		\toprule
+		\textbf{Configuration} & \textbf{Clients} & \textbf{$\varepsilon$} & \textbf{Top-$k$} & \textbf{$\Delta$ Accuracy} & \textbf{Final Accuracy} \\
+		\midrule
+		\endfirsthead
+		\multicolumn{6}{c}{\tablename\ \thetable{} -- continued from previous page}\\
+		\toprule
+		\textbf{Configuration} & \textbf{Clients} & \textbf{$\varepsilon$} & \textbf{Top-$k$} & \textbf{$\Delta_{Accuracy}$} & \textbf{Final Accuracy} \\
+		\midrule
+		\endhead
+		\midrule
+		\multicolumn{6}{r}{\textit{Continued on next page}}\\
+		\endfoot
+		\bottomrule
+		\endlastfoot
+		\multirow{3}{*}{\textbf{BASE}} & 10 & -- & -- & 0.0858 & 0.8936 \\
+		& 30 & -- & -- & 0.0319 & 0.9475 \\
+		& 60 & -- & -- & 0.0008 & 0.9785 \\
+		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+		\multirow{6}{*}{\textbf{DP}} & 10 & 1 & -- & 0.1964 & 0.7830 \\
+		& 30 & 1 & -- & 0.1844 & 0.7950 \\
+		& 60 & 1 & -- & 0.1919 & 0.7874 \\
+		& 10 & 10 & -- & 0.1824 & 0.7970 \\
+		& 30 & 10 & -- & 0.1731 & 0.8063 \\
+		& 60 & 10 & -- & 0.1773 & 0.8020 \\
+		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+		\multirow{3}{*}{\textbf{FLTrust}} & 10 & -- & -- & 0.0055 & 0.9739 \\
+		& 30 & -- & -- & 0.0012 & 0.9782 \\
+		& 60 & -- & -- & -0.0005 & 0.9798 \\
+		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+		\multirow{9}{*}{\textbf{TopK}} & 10 & -- & 0.01 & 0.0785 & 0.9009 \\
+		& 30 & -- & 0.01 & 0.0802 & 0.8992 \\
+		& 60 & -- & 0.01 & 0.0594 & 0.9199 \\
+		& 10 & -- & 0.1 & 0.1490 & 0.8304 \\
+		& 30 & -- & 0.1 & 0.0859 & 0.8935 \\
+		& 60 & -- & 0.1 & 0.0701 & 0.9092 \\
+		& 10 & -- & 0.5 & 0.0913 & 0.8881 \\
+		& 30 & -- & 0.5 & 0.0324 & 0.9470 \\
+		& 60 & -- & 0.5 & 0.0009 & 0.9784 \\
+		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+		\multirow{6}{*}{\textbf{DP + FLTrust}} & 10 & 1 & -- & 0.1022 & 0.8772 \\
+		& 30 & 1 & -- & 0.0624 & 0.9170 \\
+		& 60 & 1 & -- & 0.0458 & 0.9335 \\
+		& 10 & 10 & -- & 0.1627 & 0.8167 \\
+		& 30 & 10 & -- & 0.1439 & 0.8355 \\
+		& 60 & 10 & -- & 0.1216 & 0.8577 \\
+		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+		\multirow{18}{*}{\textbf{DP + TopK}} & 10 & 1 & 0.01 & 0.7768 & 0.2026 \\
+		& 30 & 1 & 0.01 & 0.7490 & 0.2304 \\
+		& 60 & 1 & 0.01 & 0.7121 & 0.2672 \\
+		& 10 & 10 & 0.01 & 0.7689 & 0.2105 \\
+		& 30 & 10 & 0.01 & 0.7912 & 0.1882 \\
+		& 60 & 10 & 0.01 & 0.8113 & 0.1680 \\
+		& 10 & 1 & 0.1 & 0.3513 & 0.6281 \\
+		& 30 & 1 & 0.1 & 0.3451 & 0.6343 \\
+		& 60 & 1 & 0.1 & 0.3529 & 0.6264 \\
+		& 10 & 10 & 0.1 & 0.3043 & 0.6751 \\
+		& 30 & 10 & 0.1 & 0.3041 & 0.6753 \\
+		& 60 & 10 & 0.1 & 0.2991 & 0.6802 \\
+		& 10 & 1 & 0.5 & 0.2118 & 0.7676 \\
+		& 30 & 1 & 0.5 & 0.2055 & 0.7739 \\
+		& 60 & 1 & 0.5 & 0.2067 & 0.7726 \\
+		& 10 & 10 & 0.5 & 0.1914 & 0.7880 \\
+		& 30 & 10 & 0.5 & 0.1779 & 0.8015 \\
+		& 60 & 10 & 0.5 & 0.1838 & 0.7955 \\
+		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+		\multirow{9}{*}{\textbf{FLTrust + TopK}} & 10 & -- & 0.01 & 0.0510 & 0.9284 \\
+		& 30 & -- & 0.01 & 0.0500 & 0.9294 \\
+		& 60 & -- & 0.01 & 0.0480 & 0.9313 \\
+		& 10 & -- & 0.1 & 0.0065 & 0.9729 \\
+		& 30 & -- & 0.1 & 0.0053 & 0.9741 \\
+		& 60 & -- & 0.1 & 0.0040 & 0.9753 \\
+		& 10 & -- & 0.5 & 0.0054 & 0.9740 \\
+		& 30 & -- & 0.5 & 0.0011 & 0.9783 \\
+		& 60 & -- & 0.5 & -0.0004 & 0.9797 \\
+		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
+		\multirow{18}{*}{\textbf{ALL}} & 10 & 1 & 0.01 & 0.3330 & 0.6464 \\
+		& 30 & 1 & 0.01 & 0.1729 & 0.8065 \\
+		& 60 & 1 & 0.01 & 0.0962 & 0.8831 \\
+		& 10 & 10 & 0.01 & 0.6017 & 0.3777 \\
+		& 30 & 10 & 0.01 & 0.5454 & 0.4340 \\
+		& 60 & 10 & 0.01 & 0.4603 & 0.5190 \\
+		& 10 & 1 & 0.1 & 0.1195 & 0.8599 \\
+		& 30 & 1 & 0.1 & 0.0802 & 0.8992 \\
+		& 60 & 1 & 0.1 & 0.0556 & 0.9237 \\
+		& 10 & 10 & 0.1 & 0.2817 & 0.6977 \\
+		& 30 & 10 & 0.1 & 0.2627 & 0.7167 \\
+		& 60 & 10 & 0.1 & 0.2285 & 0.7508 \\
+		& 10 & 1 & 0.5 & 0.1026 & 0.8768 \\
+		& 30 & 1 & 0.5 & 0.0670 & 0.9124 \\
+		& 60 & 1 & 0.5 & 0.0453 & 0.9340 \\
+		& 10 & 10 & 0.5 & 0.1681 & 0.8113 \\
+		& 30 & 10 & 0.5 & 0.1485 & 0.8309 \\
+		& 60 & 10 & 0.5 & 0.1312 & 0.8481 \\
+		\caption{Final and delta accuracy (relative to the no-attack BASE run) across all evaluated configurations. Unless noted otherwise, all runs use $R_\ell=10$ local epochs, a Byzantine client fraction of $0.2$, and $500$ communication rounds.}
+		\label{tab:accuracy-summary}\\
+	\end{longtable}
 \end{document}
