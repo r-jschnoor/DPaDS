@@ -58,6 +58,37 @@ def load_results(folder: str) -> list[dict]:
     return results
 
 
+def load_results_if_present(folder: str) -> list[dict]:
+    """
+    Like load_results(), but returns [] instead of exiting when folder
+    doesn't exist or contains no JSON result files.
+
+    Used for optional subfolders (e.g. clean_base_run/, see
+    export_excel_report()) that aren't present under every results folder.
+
+    Args:
+        folder (str): path to folder containing result JSON files.
+
+    Returns:
+        list[dict]: list of loaded result dicts, sorted by filename, or [].
+    """
+    if not os.path.isdir(folder):
+        return []
+    pattern = os.path.join(folder, "*.json")
+    files = sorted(
+        f for f in glob.glob(pattern)
+        if os.path.basename(f) != "run_summary.json"
+    )
+
+    results = []
+    for filepath in files:
+        with open(_io_path(filepath)) as f:
+            data = json.load(f)
+            data["_filename"] = os.path.basename(filepath)
+            results.append(data)
+    return results
+
+
 def make_label(filename: str) -> str:
     """
     Generate a short human-readable label from a result filename.
@@ -578,15 +609,18 @@ def _box_border(ws, row1, col1, row2, col2, style="thin", top=True, bottom=True,
             cell.border = Border(right=side, top=b.top, bottom=b.bottom, left=b.left)
 
 
-def _write_config_param_block(ws, config_id, variants, show_rl_row, label_col):
+def _write_config_param_block(ws, config_id, variants, show_rl_row, label_col, show_byzantine_row=False):
     """
-    Write one config's title + Clients/Epsilon/Rl/TopK header rows at label_col,
-    reproducing the hand-built layout in tmp/template_excel_output.xlsx.
+    Write one config's title + Clients/Epsilon/Rl/Byzantine fraction/TopK
+    header rows at label_col, reproducing the hand-built layout in
+    tmp/template_excel_output.xlsx (tmp/template_excel_output_third_table.xlsx
+    for show_byzantine_row=True).
 
     Shared by every per-config Excel table this module builds (see
     export_excel_report()) so the title/parameter-row scaffold isn't
     duplicated across them. Draws the title (bold, merged, centered), the
-    Clients / Epsilon / TopK rows (plus Rl if show_rl_row) giving that
+    Clients / Epsilon / TopK rows (plus Rl if show_rl_row, plus Byzantine
+    fraction -- between Rl and TopK -- if show_byzantine_row) giving that
     column's value for whichever of those parameters this config actually
     uses ("-" for a mechanism that's off for this config, e.g. Epsilon when
     use_dp=False -- not omitted, so every table has the same row layout and
@@ -603,6 +637,8 @@ def _write_config_param_block(ws, config_id, variants, show_rl_row, label_col):
                                (e.g. by variant_sort_key()).
         show_rl_row (bool):    whether to include the Rl row.
         label_col (int):       1-indexed column this block starts at.
+        show_byzantine_row (bool): whether to include the Byzantine fraction
+                                   row (between Rl and TopK).
 
     Returns:
         tuple: (last_col, topk_row) -- last_col is this block's last data
@@ -610,10 +646,14 @@ def _write_config_param_block(ws, config_id, variants, show_rl_row, label_col):
               the caller's own rows should start right after.
     """
     TITLE_ROW, CLIENTS_ROW, EPSILON_ROW = 1, 2, 3
+    next_row = 4
+    RL_ROW = None
     if show_rl_row:
-        RL_ROW, TOPK_ROW = 4, 5
-    else:
-        TOPK_ROW = 4
+        RL_ROW, next_row = next_row, next_row + 1
+    BYZANTINE_ROW = None
+    if show_byzantine_row:
+        BYZANTINE_ROW, next_row = next_row, next_row + 1
+    TOPK_ROW = next_row
     last_col = label_col + len(variants)
 
     title_cell = ws.cell(row=TITLE_ROW, column=label_col, value=replace_config_with_label(str(config_id)))
@@ -625,6 +665,8 @@ def _write_config_param_block(ws, config_id, variants, show_rl_row, label_col):
     ws.cell(row=EPSILON_ROW, column=label_col, value="Epsilon")
     if show_rl_row:
         ws.cell(row=RL_ROW, column=label_col, value="Rl")
+    if show_byzantine_row:
+        ws.cell(row=BYZANTINE_ROW, column=label_col, value="Byzantine fraction")
     ws.cell(row=TOPK_ROW, column=label_col, value="TopK")
 
     CENTER = Alignment(horizontal="center")
@@ -638,6 +680,9 @@ def _write_config_param_block(ws, config_id, variants, show_rl_row, label_col):
         if show_rl_row:
             rl = config.get("num_client_iterations_per_round")
             ws.cell(row=RL_ROW, column=data_col, value=rl if rl is not None else "-").alignment = CENTER
+        if show_byzantine_row:
+            byzantine_fraction = config["num_byzantine"] / config["num_clients"] if config["num_clients"] else 0.0
+            ws.cell(row=BYZANTINE_ROW, column=data_col, value=round(byzantine_fraction, 3)).alignment = CENTER
         ws.cell(row=TOPK_ROW, column=data_col,
                 value=config["topk_ratio"] if config["use_topk"] else "-").alignment = CENTER
 
@@ -746,22 +791,231 @@ def _write_elapsed_time_sheet(ws, groups, show_rl_row) -> None:
         col = last_col + 1
 
 
+def _zero_byzantine_base_accuracy_by_clients(results: list[dict]) -> dict[int, float]:
+    """
+    Map num_clients -> final-round accuracy of the no-attack BASE run
+    (config_id=1, num_byzantine=0) at that client count.
+
+    Used by _write_summary_sheet() for the "Delta accuracy (gap to
+    no-attack BASE)" row. A results folder swept only under attack (every
+    config's num_byzantine > 0, e.g. run_configurations.py's default
+    SHARED_PARAMS) has no entries here at all -- callers must treat a
+    missing client count as "no baseline available", not as a zero delta.
+
+    Args:
+        results (list[dict]): loaded result JSONs (see load_results()).
+
+    Returns:
+        dict[int, float]: num_clients -> zero-Byzantine BASE final accuracy.
+    """
+    base_accuracy_by_clients = {}
+    for result in results:
+        config = result["config"]
+        if config["config_id"] != 1 or config["num_byzantine"] != 0:
+            continue
+        _, accuracies = extract_metric(result, "accuracy")
+        if accuracies:
+            base_accuracy_by_clients[config["num_clients"]] = accuracies[-1]
+    return base_accuracy_by_clients
+
+
+def _write_summary_sheet(ws, groups, show_rl_row, base_accuracy_by_clients) -> None:
+    """
+    Build the per-config summary tables on ws, side by side.
+
+    One table per config, left to right in config_id order, via
+    _write_config_param_block() (with the Byzantine fraction row shown);
+    below that, one row per variant for each of:
+      - Rounds: config["num_rounds"].
+      - Bytes per client: mean over rounds of that round's total
+        update_bytes / num_clients ("bytes per client per round") --
+        "-" for result files that predate the update_bytes metric.
+      - Delta accuracy: base_accuracy_by_clients's no-attack BASE final
+        accuracy at the same client count, minus this variant's final
+        accuracy -- "N/A" if base_accuracy_by_clients has no entry for that
+        client count (see _zero_byzantine_base_accuracy_by_clients()).
+      - Final Accuracy: last round's accuracy.
+    Reproduces the hand-built layout in
+    tmp/template_excel_output_third_table.xlsx.
+
+    Args:
+        ws:              worksheet to draw on.
+        groups (dict):   config_id -> list of that config's result JSONs.
+        show_rl_row (bool): whether to include the Rl row (see _write_config_param_block()).
+        base_accuracy_by_clients (dict[int, float]): num_clients -> no-attack
+            BASE final accuracy, see _zero_byzantine_base_accuracy_by_clients().
+    """
+    CENTER = Alignment(horizontal="center")
+    col = 1
+    for config_id in sorted(groups):
+        variants = sorted(groups[config_id], key=variant_sort_key)
+        label_col = col
+        last_col, topk_row = _write_config_param_block(
+            ws, config_id, variants, show_rl_row, label_col, show_byzantine_row=True)
+
+        rounds_row = topk_row + 1
+        bytes_row = topk_row + 2
+        delta_row = topk_row + 3
+        final_row = topk_row + 4
+        ws.cell(row=rounds_row, column=label_col, value="Rounds")
+        ws.cell(row=bytes_row, column=label_col, value="Bytes per client")
+        ws.cell(row=delta_row, column=label_col, value="Delta accuracy (gap to no-attack BASE)")
+        ws.cell(row=final_row, column=label_col, value="Final Accuracy")
+
+        for i, result in enumerate(variants):
+            data_col = label_col + 1 + i
+            config = result["config"]
+
+            ws.cell(row=rounds_row, column=data_col, value=config["num_rounds"]).alignment = CENTER
+
+            per_client_bytes = [
+                entry["update_bytes"] / config["num_clients"]
+                for entry in result["results"]["per_round"]
+                if entry.get("update_bytes") is not None
+            ]
+            avg_bytes = sum(per_client_bytes) / len(per_client_bytes) if per_client_bytes else None
+            ws.cell(row=bytes_row, column=data_col,
+                    value=round(avg_bytes, 1) if avg_bytes is not None else "-").alignment = CENTER
+
+            _, accuracies = extract_metric(result, "accuracy")
+            final_accuracy = accuracies[-1] if accuracies else None
+            base_accuracy = base_accuracy_by_clients.get(config["num_clients"])
+            if base_accuracy is None or final_accuracy is None:
+                delta_value = "N/A"
+                print("Could not find clean baserun folder. Skipping delta accuracy...")
+            else:
+                delta_value = round(base_accuracy - final_accuracy, 4)
+            ws.cell(row=delta_row, column=data_col, value=delta_value).alignment = CENTER
+
+            ws.cell(row=final_row, column=data_col,
+                    value=round(final_accuracy, 4) if final_accuracy is not None else "-").alignment = CENTER
+
+        _box_border(ws, rounds_row, label_col, final_row, last_col, style="medium", top=False)
+        _box_border(ws, rounds_row, label_col, final_row, label_col, style="thin", top=False, bottom=False, left=False)
+
+        col = last_col + 1
+
+
+def _collect_trust_scores(result: dict) -> tuple[list[float], list[float]]:
+    """
+    Pool every (client, round) trust-score observation for one result,
+    split into honest vs malicious.
+
+    Reads results.malicious_clients (a {client_id: is_malicious} dict) and
+    each round's trust_scores (a {client_id: score} dict, see
+    mechanisms/robust_aggregation.py's FLTrustStrategy.aggregate_fit()).
+    Pooling across all rounds (rather than e.g. only the final round)
+    mirrors the aggregate honest/malicious comparison in src/README.md's
+    "FLTrust trust-score decay investigation" section.
+
+    Args:
+        result (dict): loaded result JSON.
+
+    Returns:
+        tuple: (honest_scores, malicious_scores) -- flat lists of floats.
+              Both empty if this variant has no trust_scores at all (e.g.
+              use_fltrust=False).
+    """
+    malicious_clients = result["results"].get("malicious_clients", {})
+    honest_scores = []
+    malicious_scores = []
+    for entry in result["results"]["per_round"]:
+        trust_scores = entry.get("trust_scores")
+        if not trust_scores:
+            continue
+        for client_id, score in trust_scores.items():
+            if malicious_clients.get(client_id, False):
+                malicious_scores.append(score)
+            else:
+                honest_scores.append(score)
+    return honest_scores, malicious_scores
+
+
+def _write_trust_per_client_sheet(ws, groups, show_rl_row) -> None:
+    """
+    Build the per-config trust-per-client tables on ws, side by side.
+
+    One table per config, left to right in config_id order, via
+    _write_config_param_block() (with the Byzantine fraction row shown);
+    below that, four rows per variant -- mean and std of the honest
+    clients' trust scores, then mean and std of the malicious clients'
+    trust scores (see _collect_trust_scores()), each pooled across every
+    round. "-" for configs with no trust scores at all (use_fltrust=False).
+    Reproduces the hand-built layout in
+    tmp/template_excel_output_forth_table.xlsx.
+
+    Args:
+        ws:              worksheet to draw on.
+        groups (dict):   config_id -> list of that config's result JSONs.
+        show_rl_row (bool): whether to include the Rl row (see _write_config_param_block()).
+    """
+    CENTER = Alignment(horizontal="center")
+    col = 1
+    for config_id in sorted(groups):
+        variants = sorted(groups[config_id], key=variant_sort_key)
+        label_col = col
+        last_col, topk_row = _write_config_param_block(
+            ws, config_id, variants, show_rl_row, label_col, show_byzantine_row=True)
+
+        honest_mean_row = topk_row + 1
+        honest_std_row = topk_row + 2
+        malicious_mean_row = topk_row + 3
+        malicious_std_row = topk_row + 4
+        ws.cell(row=honest_mean_row, column=label_col, value="TpC mean (honest)")
+        ws.cell(row=honest_std_row, column=label_col, value="TpC std (honest)")
+        ws.cell(row=malicious_mean_row, column=label_col, value="TpC mean (malicious)")
+        ws.cell(row=malicious_std_row, column=label_col, value="TpC std (malicious)")
+
+        for i, result in enumerate(variants):
+            data_col = label_col + 1 + i
+            honest_scores, malicious_scores = _collect_trust_scores(result)
+
+            ws.cell(row=honest_mean_row, column=data_col,
+                    value=round(float(np.mean(honest_scores)), 4) if honest_scores else "-").alignment = CENTER
+            ws.cell(row=honest_std_row, column=data_col,
+                    value=round(float(np.std(honest_scores)), 4) if honest_scores else "-").alignment = CENTER
+            ws.cell(row=malicious_mean_row, column=data_col,
+                    value=round(float(np.mean(malicious_scores)), 4) if malicious_scores else "-").alignment = CENTER
+            ws.cell(row=malicious_std_row, column=data_col,
+                    value=round(float(np.std(malicious_scores)), 4) if malicious_scores else "-").alignment = CENTER
+
+        _box_border(ws, honest_mean_row, label_col, malicious_std_row, last_col, style="medium", top=False)
+        _box_border(ws, honest_mean_row, label_col, malicious_std_row, label_col, style="thin", top=False, bottom=False, left=False)
+
+        col = last_col + 1
+
+
 def export_excel_report(folder: str) -> None:
     """
-    Export the full Excel report for a results folder: one workbook, two
+    Export the full Excel report for a results folder: one workbook, four
     sheets, each laying out one bordered table per config side by side --
-    "Accuracy by Round" (per-round accuracy, see _write_accuracy_sheet()) and
+    "Accuracy by Round" (per-round accuracy, see _write_accuracy_sheet()),
     "Elapsed Time" (avg time per round + total wall-clock time, see
-    _write_elapsed_time_sheet()). Reproduces the hand-built layout in
-    tmp/template_excel_output.xlsx for the shared title/Clients/Epsilon/Rl/TopK
-    header block (_write_config_param_block()).
+    _write_elapsed_time_sheet()), "Summary" (Rounds/Bytes per client/Delta
+    accuracy/Final Accuracy, see _write_summary_sheet()), and "Trust per
+    Client" (honest/malicious trust-score mean+std, see
+    _write_trust_per_client_sheet()). Reproduces the hand-built layouts in
+    tmp/template_excel_output.xlsx, tmp/template_excel_output_third_table.xlsx,
+    and tmp/template_excel_output_forth_table.xlsx for the shared
+    title/Clients/Epsilon/Rl/(Byzantine fraction)/TopK header block
+    (_write_config_param_block()).
 
-    The Rl row (shared by both sheets) is only added at all if at least one
-    result in folder actually has num_client_iterations_per_round set --
+    The Rl row (shared by all four sheets) is only added at all if at least
+    one result in folder actually has num_client_iterations_per_round set --
     older result files predate that field entirely, and it's meaningless
     clutter (an all-"-" row) for a folder where nothing set it. Reads every
     JSON file present in folder via load_results(), so this works for any
     number of config runs/variants, same as every other visualize_* function.
+
+    The Summary sheet's "Delta accuracy" row needs a no-attack (num_byzantine=0)
+    BASE run to compare against. Since folder's own JSON files are typically
+    swept entirely under attack (see run_configurations.py's SHARED_PARAMS),
+    that baseline usually doesn't live among them -- it's read from
+    folder/clean_base_run/ instead (a subfolder holding a copy of a separate
+    no-attack run's result JSONs, see e.g. results/full-grid-run-combined/
+    clean_base_run/), if present. Falls back to folder's own results (covers
+    folders where the no-attack BASE run *is* one of the swept variants), and
+    to "N/A" for any client count found in neither place.
 
     Args:
         folder (str): path to folder containing result JSON files.
@@ -773,6 +1027,9 @@ def export_excel_report(folder: str) -> None:
     for result in results:
         groups[result["config"]["config_id"]].append(result)
 
+    clean_base_run_results = load_results_if_present(os.path.join(folder, "clean_base_run"))
+    base_accuracy_by_clients = _zero_byzantine_base_accuracy_by_clients(results + clean_base_run_results)
+
     wb = Workbook()
     accuracy_ws = wb.active
     accuracy_ws.title = "Accuracy by Round"
@@ -780,6 +1037,12 @@ def export_excel_report(folder: str) -> None:
 
     elapsed_ws = wb.create_sheet("Elapsed Time")
     _write_elapsed_time_sheet(elapsed_ws, groups, show_rl_row)
+
+    summary_ws = wb.create_sheet("Summary")
+    _write_summary_sheet(summary_ws, groups, show_rl_row, base_accuracy_by_clients)
+
+    trust_ws = wb.create_sheet("Trust per Client")
+    _write_trust_per_client_sheet(trust_ws, groups, show_rl_row)
 
     output_path = os.path.join(folder, "accuracy_by_round.xlsx")
     wb.save(_io_path(output_path))
@@ -1008,143 +1271,186 @@ def visualize_radar_chart_per_config(folder: str) -> None:
     plt.close()
 
 
+def _descriptive_variant_filename(filename: str, ext: str) -> str:
+    """
+    Build a descriptive, filesystem-safe filename for one result variant.
+
+    Reuses run_configurations.py's make_filename() naming (dataset/config/
+    dp/fltrust/topk/rounds/clients/byzantine/attack/...), stripping its
+    leading run_timestamp -- unique already, but not descriptive of the
+    variant itself, and the containing run folder (which may combine
+    several timestamped runs, e.g. results/full-grid-run-combined/) already
+    scopes it. Anchored on the "dataset-" token (always the first
+    descriptive part make_filename() writes) rather than a fixed token
+    count, so it doesn't assume a particular timestamp format.
+
+    Args:
+        filename (str): original result JSON filename (result["_filename"]).
+        ext (str):       output file extension, without the dot, e.g. "png".
+
+    Returns:
+        str: e.g. "dataset-mnist_config-3_dp-False_fltrust-True_topk-False_
+             rounds-500_clients-10_byzantine-2_attack-label_flip_scale-2.0_Rl-10.png".
+    """
+    parts = filename.replace(".json", "").split("_")
+    start = next((i for i, part in enumerate(parts) if part.startswith("dataset-")), 0)
+    return "_".join(parts[start:]) + f".{ext}"
+
+
 def visualize_confusion_matrices(folder: str) -> None:
     """
-    One subplot per config showing confusion matrix as heatmap.
+    One confusion-matrix heatmap PNG per result JSON.
+
+    Previously rendered a single combined PNG with one subplot per config,
+    each showing only that config's best-accuracy variant via
+    group_by_config_id() -- every other variant's confusion matrix was
+    silently discarded (see TODO.md's "What to do next"). Now saves one
+    file per result JSON instead, under
+    confusion_matrices/config_<id>/<descriptive_filename>.png -- a config
+    subfolder one level deeper than f1_tables/'s layout, since every
+    variant now gets its own file rather than one shared per config.
+    Results with no confusion_matrix (e.g. very old files) are skipped.
 
     Args:
         folder (str): path to folder containing result JSON files.
     """
     results = load_results(folder)
-
-    # Group by config_id, pick variant with best final accuracy
-    #//TODO können wir hier alle plotten?
-    config_matrices = group_by_config_id(results)
-
-    num_configs = len(config_matrices)
-    cols        = min(4, num_configs)
-    rows        = (num_configs + cols - 1) // cols
-    fig, axes   = plt.subplots(rows, cols, figsize=(cols * 4, rows * 4))
-    fig.suptitle("Confusion Matrices per Config (best variant)", fontsize=13)
-    if rows == 1 and cols == 1:
-        axes = [axes]
-    else:
-        axes = np.array(axes).flatten()
-
     num_classes  = get_dataset_spec(results[0]["config"].get("dataset", "mnist")).num_classes
     digit_labels = [str(i) for i in range(num_classes)]
 
-    for idx, (config_id, (label, _, matrix)) in enumerate(sorted(config_matrices.items())):
-        ax  = axes[idx]
-        mat = np.array(matrix)
+    saved = 0
+    for result in results:
+        matrix = result["results"].get("confusion_matrix")
+        if matrix is None:
+            continue
+
+        config_id = result["config"]["config_id"]
+        label     = make_label(result["_filename"])
+        mat       = np.array(matrix)
 
         # normalize by row (true label) to show percentages
         row_sums = mat.sum(axis=1, keepdims=True)
         mat_norm = np.where(row_sums > 0, mat / row_sums, 0)
 
+        fig, ax = plt.subplots(figsize=(5, 5))
         im = ax.imshow(mat_norm, interpolation="nearest", cmap="Blues", vmin=0, vmax=1)
-        ax.set_title(f"{replace_config_with_label(str(config_id))}\n{label}", fontsize=7)
-        ax.set_xlabel("Predicted", fontsize=8)
-        ax.set_ylabel("True", fontsize=8)
+        ax.set_title(f"{replace_config_with_label(str(config_id))} - {label}", fontsize=9)
+        ax.set_xlabel("Predicted")
+        ax.set_ylabel("True")
         ax.set_xticks(range(num_classes))
         ax.set_yticks(range(num_classes))
-        ax.set_xticklabels(digit_labels, fontsize=6)
-        ax.set_yticklabels(digit_labels, fontsize=6)
+        ax.set_xticklabels(digit_labels, fontsize=7)
+        ax.set_yticklabels(digit_labels, fontsize=7)
 
         # annotate cells with percentage
         for i in range(num_classes):
             for j in range(num_classes):
                 ax.text(j, i, f"{mat_norm[i,j]:.0%}",
                         ha="center", va="center",
-                        fontsize=4,
+                        fontsize=6,
                         color="white" if mat_norm[i,j] > 0.5 else "black")
 
         plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        plt.tight_layout()
 
-    # hide unused subplots
-    for idx in range(len(config_matrices), len(axes)):
-        axes[idx].set_visible(False)
+        config_folder = os.path.join(folder, "confusion_matrices", f"config_{config_id}")
+        os.makedirs(config_folder, exist_ok=True)
+        output_path = os.path.join(config_folder, _descriptive_variant_filename(result["_filename"], "png"))
+        plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
+        plt.close()
+        saved += 1
 
-    plt.tight_layout()
-    output_path = os.path.join(folder, "confusion_matrices.png")
-    plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
-    print(f"Saved to: {output_path}")
-    plt.close()
+    print(f"Saved {saved} confusion matrices to: {os.path.join(folder, 'confusion_matrices')}")
 
 
 def visualize_f1_score(folder: str) -> None:
     """
-    One subplot per config showing per-class F1, precision, recall.
+    One per-class F1/precision/recall bar-chart PNG per result JSON.
+
+    Previously rendered a single combined PNG with one subplot per config,
+    each showing only that config's best-accuracy variant via
+    group_by_config_id() -- every other variant's scores were silently
+    discarded (see TODO.md's "What to do next"). Now saves one file per
+    result JSON instead, under f1_charts/config_<id>/<descriptive_filename>.png,
+    mirroring visualize_confusion_matrices()'s restructuring. Results with
+    no per_class_scores (e.g. very old files) are skipped.
 
     Args:
         folder (str): path to folder containing result JSON files.
     """
     results = load_results(folder)
-
-    # Group by config_id, pick variant with best final accuracy
-    config_scores = group_by_config_id(results)
-
-    num_configs = len(config_scores)
-    cols        = min(4, num_configs)
-    rows        = (num_configs + cols - 1) // cols
-    fig, axes   = plt.subplots(rows, cols, figsize=(cols * 4, rows * 3.5))
-    fig.suptitle("Per-class F1 / Precision / Recall per Config (best variant)", fontsize=13)
-    
-    if rows == 1 and cols == 1:
-        axes = [axes]
-    else:
-        axes = np.array(axes).flatten()
-
-    metrics      = ["precision", "recall", "f1"]
-    colors       = ["#4C72B0", "#55A868", "#C44E52"]
     num_classes  = get_dataset_spec(results[0]["config"].get("dataset", "mnist")).num_classes
     digit_labels = [str(i) for i in range(num_classes)]
-    x            = np.arange(num_classes)
-    width        = 0.25
 
-    for idx, (config_id, (label, scores, _)) in enumerate(sorted(config_scores.items())):
-        ax = axes[idx]
+    metrics = ["precision", "recall", "f1"]
+    colors  = ["#4C72B0", "#55A868", "#C44E52"]
+    x       = np.arange(num_classes)
+    width   = 0.25
 
+    saved = 0
+    for result in results:
+        scores = result["results"].get("per_class_scores")
+        if scores is None:
+            continue
+
+        config_id = result["config"]["config_id"]
+        label     = make_label(result["_filename"])
+
+        fig, ax = plt.subplots(figsize=(6, 4.5))
         for m_idx, (metric, color) in enumerate(zip(metrics, colors)):
             values = [scores[str(d)][metric] for d in range(num_classes)]
             ax.bar(x + m_idx * width, values, width, label=metric, color=color, alpha=0.85)
 
-        ax.set_title(f"{replace_config_with_label(str(config_id))}\n{label}", fontsize=7)
-        ax.set_xlabel("Digit class", fontsize=8)
-        ax.set_ylabel("Score", fontsize=8)
+        ax.set_title(f"{replace_config_with_label(str(config_id))} - {label}", fontsize=9)
+        ax.set_xlabel("Digit class")
+        ax.set_ylabel("Score")
         ax.set_xticks(x + width)
-        ax.set_xticklabels(digit_labels, fontsize=7)
+        ax.set_xticklabels(digit_labels, fontsize=8)
         ax.set_ylim(0, 1.1)
         ax.grid(axis="y", alpha=0.3)
-        ax.legend(fontsize=6, loc="lower right")
+        ax.legend(fontsize=7, loc="lower right")
+        plt.tight_layout()
 
-    for idx in range(len(config_scores), len(axes)):
-        axes[idx].set_visible(False)
+        config_folder = os.path.join(folder, "f1_charts", f"config_{config_id}")
+        os.makedirs(config_folder, exist_ok=True)
+        output_path = os.path.join(config_folder, _descriptive_variant_filename(result["_filename"], "png"))
+        plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
+        plt.close()
+        saved += 1
 
-    plt.tight_layout()
-    output_path = os.path.join(folder, "f1_charts.png")
-    plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
-    print(f"Saved to: {output_path}")
-    plt.close()
+    print(f"Saved {saved} F1 charts to: {os.path.join(folder, 'f1_charts')}")
 
 
 def visualize_f1_tables(folder: str) -> None:
     """
-    One summary table per config showing TP/FP/FN/TN and F1 metrics per digit class.
+    One summary table PNG per result JSON showing TP/FP/FN/TN and F1 metrics
+    per digit class.
 
-    Saves one PNG per config into a 'f1_tables' subfolder.
+    Previously kept only each config's best-accuracy variant (via
+    group_by_config_id()), saving one file per config into a flat
+    'f1_tables' subfolder. Now saves one file per result JSON instead,
+    under f1_tables/config_<id>/<descriptive_filename>.png -- one folder
+    deeper, mirroring visualize_confusion_matrices()'s and
+    visualize_f1_score()'s restructuring (see TODO.md's "What to do next").
+    Results missing per_class_scores or confusion_matrix (e.g. very old
+    files) are skipped.
 
     Args:
         folder (str): path to folder containing result JSON files.
     """
     results = load_results(folder)
-
-    config_data = group_by_config_id(results)
     num_classes = get_dataset_spec(results[0]["config"].get("dataset", "mnist")).num_classes
 
-    os.makedirs(os.path.join(folder, "f1_tables"), exist_ok=True)
+    saved = 0
+    for result in results:
+        scores = result["results"].get("per_class_scores")
+        matrix = result["results"].get("confusion_matrix")
+        if scores is None or matrix is None:
+            continue
 
-    for config_id, (label, scores, matrix) in sorted(config_data.items()):
+        config_id = result["config"]["config_id"]
+        label     = make_label(result["_filename"])
+
         fig, ax = plt.subplots(figsize=(12, 4))
         test_size = sum(sum(row) for row in matrix)
         ax.set_title(f"{replace_config_with_label(str(config_id))} - {label} (n={test_size:,})", fontsize=10, pad=10)
@@ -1233,48 +1539,14 @@ def visualize_f1_tables(folder: str) -> None:
                     cell.set_facecolor("#E8E8E8")
 
         plt.tight_layout()
-        output_path = os.path.join(folder, "f1_tables", f"f1_table_config_{config_id}.png")
+        config_folder = os.path.join(folder, "f1_tables", f"config_{config_id}")
+        os.makedirs(config_folder, exist_ok=True)
+        output_path = os.path.join(config_folder, _descriptive_variant_filename(result["_filename"], "png"))
         plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
-        print(f"Saved to: {output_path}")
         plt.close()
+        saved += 1
 
-
-def group_by_config_id(results):
-    """
-    Group results by config_id keeping the best accuracy variant per config.
-
-    For configs with multiple variants (e.g. different epsilon or topk values),
-    only the variant with the highest final round accuracy is kept.
-    Results without per_class_scores are skipped.
-
-    Args:
-        results (list[dict]): list of loaded result dicts from load_results().
-
-    Returns:
-        dict: mapping config_id (int) to (label, per_class_scores, confusion_matrix) where
-              - label (str):              short human-readable label from make_label()
-              - per_class_scores (dict):  per-class precision, recall and F1 scores
-                                          keyed by digit class string e.g. "0".."9"
-              - confusion_matrix (list):  10x10 list of lists, or None if not present
-    """
-    config_scores = {}
-    for result in results:
-        config_id      = result["config"]["config_id"]
-        per_class      = result["results"].get("per_class_scores")
-        confusion_matrix = result["results"].get("confusion_matrix")
-        final_accuracy = result["results"]["per_round"][-1].get("accuracy", 0)
-        label          = make_label(result["_filename"])
-
-        if per_class is None:
-            continue
-
-        if config_id not in config_scores or final_accuracy > config_scores[config_id][3]:
-            config_scores[config_id] = (label, per_class, confusion_matrix, final_accuracy)
-
-    return {
-        config_id: (label, scores, matrix)
-        for config_id, (label, scores, matrix, _) in config_scores.items()
-    }
+    print(f"Saved {saved} F1 tables to: {os.path.join(folder, 'f1_tables')}")
 
 
 def visualize_label_distribution(folder: str) -> None:

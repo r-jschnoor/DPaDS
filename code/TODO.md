@@ -7,12 +7,14 @@
     - Robustness: max(1, 1 - delta_accuracy) (delta_accuracy = clean_accuracy - actual_accuracy_x)
     - Efficiency: (set alpha 0.5, t = runtime of config, bytes = bytes per client per round, base = no attack config 1, x = current run results) -> alpha * t_base/t_x + (1-alpha)*((bytes_base-bytes_x)/bytes_base)
 
-- Per config line chart misses parameters (e.g. see full-grid-run-combined config-1)
-- Confusion matrices and f1, one plot per result file
 
 
 
 - Write Setup section 5.5 in report (hardware and software stack)
+- Glossar
+- Link to Repo
+
+
 
 -----
 
@@ -44,8 +46,7 @@ Parameters to test in a series run: ds(mnist), Eps(1,(5),10), topk(0.01,0.1,(0.5
 -----
 
 ### What to do next
-
-
+1. Currently the confusion matrix plot generalizes over the results and takes only one of each config. Change this to generate one matrix for each result json. Those should be placed in confusion_matrices/<config>/<nice_descripive_filename> (a double subfolder in the respective folder. Similar to e.g. f1_tables but one folder deeper). Similar to this, the f1_charts also need to be updated.
 
 
 ### How to get to computation ressources
@@ -55,3 +56,8 @@ Parameters to test in a series run: ds(mnist), Eps(1,(5),10), topk(0.01,0.1,(0.5
 4. To see all sessions run: `tmux list-sessions`
 5. If there is a current session: `tmux attach -t <sess_name>`
 6. To start a session: `tmux new -s <sess_name>`
+
+
+
+## Notes on the Report
+- Introduction: Still mentions "Privacy–Robustness–Performance" instead of Efficiency?
