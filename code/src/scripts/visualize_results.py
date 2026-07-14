@@ -1049,6 +1049,235 @@ def export_excel_report(folder: str) -> None:
     print(f"Saved to: {output_path}")
 
 
+LATEX_TABLE_HEADER = """\\begin{longtable}{@{}l c c c c c c c c c c@{}}
+\t\\toprule
+\t\\textbf{Configuration} & \\textbf{Clients} & \\textbf{$\\varepsilon$} & \\textbf{Top-$k$} & \\textbf{kB/client} & \\textbf{$\\Delta$ Acc.} & \\textbf{Final Acc.} & \\textbf{$\\mu_{\\text{h}}$} & \\textbf{$\\sigma_{\\text{h}}$} & \\textbf{$\\mu_{\\text{m}}$} & \\textbf{$\\sigma_{\\text{m}}$} \\\\
+\t\\midrule
+\t\\endfirsthead
+\t\\multicolumn{11}{c}{\\tablename\\ \\thetable{} -- continued from previous page}\\\\
+\t\\toprule
+\t\\textbf{Configuration} & \\textbf{Clients} & \\textbf{$\\varepsilon$} & \\textbf{Top-$k$} & \\textbf{kB/client} & \\textbf{$\\Delta$ Acc.} & \\textbf{Final Acc.} & \\textbf{$\\mu_{\\text{h}}$} & \\textbf{$\\sigma_{\\text{h}}$} & \\textbf{$\\mu_{\\text{m}}$} & \\textbf{$\\sigma_{\\text{m}}$} \\\\
+\t\\midrule
+\t\\endhead
+\t\\midrule
+\t\\multicolumn{11}{r}{\\textit{Continued on next page}}\\\\
+\t\\endfoot
+\t\\bottomrule
+\t\\multicolumn{11}{@{}p{16cm}@{}}{\\footnotesize $\\mu_{\\text{h}}$/$\\sigma_{\\text{h}}$: mean/std of the trust score assigned to honest clients; $\\mu_{\\text{m}}$/$\\sigma_{\\text{m}}$: mean/std of the trust score assigned to malicious clients (FLTrust-based configurations only).}\\\\
+\t\\endlastfoot
+"""
+
+# BASE, DP, FLTrust -- the only config_ids whose best (lowest delta accuracy)
+# variant gets bolded, mirroring tmp/latex_table_to_correct.tex's own
+# convention (the other 5 blocks are left unbolded there too).
+LATEX_TABLE_BOLD_CONFIG_IDS = {1, 2, 3}
+
+
+def _fmt_or_dash(value, decimals=4):
+    """Format a possibly-missing numeric value for a LaTeX cell ("--" if None)."""
+    return "--" if value is None else f"{value:.{decimals}f}"
+
+
+def _fmt_epsilon_cell(epsilon):
+    """Format epsilon for a LaTeX cell -- "--" if DP is off, no trailing .0 if whole."""
+    if epsilon is None:
+        return "--"
+    return str(int(epsilon)) if epsilon == int(epsilon) else str(epsilon)
+
+
+def _fmt_topk_cell(topk_ratio):
+    """Format topk_ratio for a LaTeX cell -- "--" if TopK is off, no trailing zeros otherwise."""
+    return "--" if topk_ratio is None else f"{topk_ratio:g}"
+
+
+def _kb_per_client(result: dict, num_params: int) -> float:
+    """
+    Per-client, per-round communication size in decimal KB (bytes / 1000).
+
+    Uses the real recorded update_bytes average across this result's rounds
+    when present (see _write_summary_sheet()); falls back to the theoretical
+    dense/TopK formula against a dummy all-ones vector sized from num_params
+    for result files that predate the update_bytes metric -- same fallback
+    visualize_bytes_per_client_topk() uses, so this can't drift out of sync
+    with that chart.
+
+    Args:
+        result (dict):    loaded result JSON.
+        num_params (int): this result's model's total parameter count (see
+                          get_dataset_spec()).
+
+    Returns:
+        float: KB per client per round.
+    """
+    config = result["config"]
+    per_client_bytes = [
+        entry["update_bytes"] / config["num_clients"]
+        for entry in result["results"]["per_round"]
+        if entry.get("update_bytes") is not None
+    ]
+    if per_client_bytes:
+        avg_bytes = sum(per_client_bytes) / len(per_client_bytes)
+    else:
+        dummy = np.ones(num_params, dtype=np.float32)
+        if config["use_topk"]:
+            sparsified = topk_sparsify(dummy, config["topk_ratio"])
+            avg_bytes = update_size_bytes(None, use_topk=True, sparsified_update=sparsified)
+        else:
+            avg_bytes = update_size_bytes([dummy], use_topk=False)
+    return avg_bytes / 1000
+
+
+def _latex_table_caption(results: list[dict]) -> str:
+    """
+    Build the table's caption, noting Rl/Byzantine-fraction/rounds only when
+    uniform across every row -- avoids hardcoding a claim (as
+    tmp/latex_table_to_correct.tex's hand-written caption did) that would go
+    stale the moment a folder mixes runs with different settings.
+
+    Args:
+        results (list[dict]): loaded result JSONs making up the table's rows.
+
+    Returns:
+        str: caption text (no surrounding \\caption{}).
+    """
+    rl_values = {r["config"].get("num_client_iterations_per_round") for r in results}
+    byzantine_values = {
+        round(r["config"]["num_byzantine"] / r["config"]["num_clients"], 3) if r["config"]["num_clients"] else None
+        for r in results
+    }
+    round_values = {r["config"]["num_rounds"] for r in results}
+
+    notes = []
+    if len(rl_values) == 1 and None not in rl_values:
+        notes.append(f"$R_\\ell={next(iter(rl_values))}$ local epochs")
+    if len(byzantine_values) == 1 and None not in byzantine_values:
+        notes.append(f"a Byzantine client fraction of ${next(iter(byzantine_values))}$")
+    if len(round_values) == 1:
+        notes.append(f"${next(iter(round_values))}$ communication rounds")
+
+    caption = ("Final and delta accuracy (relative to the no-attack BASE run), transferred payload per "
+               "client per round, and per-round trust-score statistics (mean/std for honest and malicious "
+               "clients, applicable only to FLTrust-based configurations) across all evaluated configurations.")
+    if notes:
+        if len(notes) == 1:
+            joined = notes[0]
+        elif len(notes) == 2:
+            joined = notes[0] + " and " + notes[1]
+        else:
+            joined = ", ".join(notes[:-1]) + ", and " + notes[-1]
+        caption += " Unless noted otherwise, all runs use " + joined + "."
+    return caption
+
+
+def export_latex_table(folder: str) -> None:
+    """
+    Export a LaTeX longtable summarizing every config/variant in folder --
+    Clients/epsilon/Top-k/kB-per-client/Delta-accuracy/Final-accuracy/trust-
+    score mean+std, one \\multirow block per config_id (BASE..ALL, see
+    replace_config_with_label()), rows within a block ordered by
+    variant_sort_key(). Reproduces the hand-built table in
+    tmp/latex_table_to_correct.tex, computed straight from the loaded result
+    JSONs (same sources as export_excel_report()'s Summary/Trust per Client
+    sheets) instead of via a manual Excel-to-LaTeX transcription step --
+    which is exactly where that hand-built table had silently shifted its
+    four trust-score columns by one (see _collect_trust_scores() callers
+    below: mu_h/sigma_h/mu_m/sigma_m are read straight into their own cells,
+    no row-window offset possible).
+
+    kB/client: see _kb_per_client(). Delta accuracy needs a no-attack
+    (num_byzantine=0) BASE run to compare against -- read from
+    folder/clean_base_run/ if present, else folder's own results (see
+    _zero_byzantine_base_accuracy_by_clients()), "N/A" if neither has a
+    matching client count. Bolding: only the BASE/DP/FLTrust blocks
+    (config_id 1-3) get their best variant (lowest delta accuracy) bolded,
+    matching tmp/latex_table_to_correct.tex's own convention.
+
+    Args:
+        folder (str): path to folder containing result JSON files.
+    """
+    results = load_results(folder)
+    clean_base_run_results = load_results_if_present(os.path.join(folder, "clean_base_run"))
+    base_accuracy_by_clients = _zero_byzantine_base_accuracy_by_clients(results + clean_base_run_results)
+
+    groups = defaultdict(list)
+    for result in results:
+        groups[result["config"]["config_id"]].append(result)
+
+    num_params_by_dataset = {}
+
+    def num_params_for(dataset):
+        if dataset not in num_params_by_dataset:
+            spec = get_dataset_spec(dataset)
+            num_params_by_dataset[dataset] = sum(p.numel() for p in spec.model_fn().parameters())
+        return num_params_by_dataset[dataset]
+
+    lines = []
+    config_ids = sorted(groups)
+    for block_idx, config_id in enumerate(config_ids):
+        variants = sorted(groups[config_id], key=variant_sort_key)
+        label = replace_config_with_label(str(config_id))
+
+        rows = []
+        for result in variants:
+            config = result["config"]
+            _, accuracies = extract_metric(result, "accuracy")
+            final_accuracy = accuracies[-1] if accuracies else None
+            base_accuracy = base_accuracy_by_clients.get(config["num_clients"])
+            delta = (round(base_accuracy - final_accuracy, 4)
+                     if base_accuracy is not None and final_accuracy is not None else None)
+
+            honest_scores, malicious_scores = _collect_trust_scores(result)
+
+            rows.append(dict(
+                clients=config["num_clients"],
+                epsilon=config["epsilon"] if config["use_dp"] else None,
+                topk=config["topk_ratio"] if config["use_topk"] else None,
+                kb=_kb_per_client(result, num_params_for(config.get("dataset", "mnist"))),
+                delta=delta,
+                final=final_accuracy,
+                mean_h=float(np.mean(honest_scores)) if honest_scores else None,
+                std_h=float(np.std(honest_scores)) if honest_scores else None,
+                mean_m=float(np.mean(malicious_scores)) if malicious_scores else None,
+                std_m=float(np.std(malicious_scores)) if malicious_scores else None,
+            ))
+
+        bold_row = None
+        if config_id in LATEX_TABLE_BOLD_CONFIG_IDS:
+            numeric_rows = [r for r in rows if r["delta"] is not None]
+            if numeric_rows:
+                bold_row = min(numeric_rows, key=lambda r: r["delta"])
+
+        for i, row in enumerate(rows):
+            prefix = f"\\multirow{{{len(rows)}}}{{*}}{{\\textbf{{{label}}}}} " if i == 0 else ""
+            delta_s = _fmt_or_dash(row["delta"])
+            final_s = _fmt_or_dash(row["final"])
+            if row is bold_row:
+                delta_s = f"\\textbf{{{delta_s}}}"
+                final_s = f"\\textbf{{{final_s}}}"
+            lines.append(
+                f"\t{prefix}& {row['clients']} & {_fmt_epsilon_cell(row['epsilon'])} & {_fmt_topk_cell(row['topk'])} & "
+                f"{row['kb']:.1f} & {delta_s} & {final_s} & "
+                f"{_fmt_or_dash(row['mean_h'])} & {_fmt_or_dash(row['std_h'])} & "
+                f"{_fmt_or_dash(row['mean_m'])} & {_fmt_or_dash(row['std_m'])} \\\\"
+            )
+
+        if block_idx != len(config_ids) - 1:
+            lines.append("\t\\arrayrulecolor{gray!60}\\midrule\\arrayrulecolor{black}")
+
+    content = (
+        LATEX_TABLE_HEADER
+        + "\n".join(lines)
+        + f"\n\t\\caption{{{_latex_table_caption(results)}}}\n"
+        + "\t\\label{tab:accuracy-summary}\n"
+        + "\\end{longtable}\n"
+    )
+
+    output_path = os.path.join(folder, "accuracy_summary_table.tex")
+    with open(_io_path(output_path), "w") as f:
+        f.write(content)
+    print(f"Saved to: {output_path}")
+
+
 def get_base_accuracy_and_max_epsilon(results):
     """
     Find base accuracy and max epsilon in results.
@@ -1908,10 +2137,11 @@ if __name__ == "__main__":
                         choices=["all", "lines", "bar", "radar", "radar_per_conf", "lines_per_conf",
                                  "confusion", "f1_chart", "f1_table_per_conf", "label_dist",
                                  "trust_per_client", "trust_rounds", "trust_rounds_per_conf", "excel",
-                                 "duration_per_conf", "bytes_bar"],
+                                 "duration_per_conf", "bytes_bar", "latex_table"],
                         default="all",
-                        help="which plot to generate (default: all). 'bytes_bar' is not included in "
-                             "'all' since it's a model-size fact, not a per-run result")
+                        help="which plot to generate (default: all). 'bytes_bar' and 'latex_table' are "
+                             "not included in 'all' -- bytes_bar is a model-size fact, not a per-run "
+                             "result, and latex_table is a paper-specific export")
     args = parser.parse_args(args=None if len(sys.argv) > 1 else ["--help"])
 
     if args.plot in ("all", "lines"):
@@ -1944,3 +2174,5 @@ if __name__ == "__main__":
         visualize_duration_per_config(args.folder)
     if args.plot == "bytes_bar":
         visualize_bytes_per_client_topk(args.folder)
+    if args.plot == "latex_table":
+        export_latex_table(args.folder)
