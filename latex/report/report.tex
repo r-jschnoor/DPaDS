@@ -18,6 +18,8 @@
 \usepackage{tikz}
 \usepackage{pgfplots}
 \usepackage{placeins}
+\usepackage{tabularx}
+\usepackage{booktabs}
 \usepackage[table,xcdraw]{xcolor}
 \pgfplotsset{compat=1.18}
 \usepackage[printonlyused]{acronym}
@@ -56,6 +58,8 @@
 		\acro{SGD}{Stochastic Gradient Descend}
 		\acro{DP}{Differential Privacy}
 	\end{acronym}
+	
+	\placeholder{glossary}
 	
 % --------------------------------------------------
 	\section{Introduction}
@@ -167,6 +171,7 @@
 	The failure probability $\delta$, introduced by Dwork et al.~\cite{privacy_delta}, denotes the probability that the plain $\varepsilon$-\ac{DP} is broken and should be chosen smaller than the inverse size of the local dataset.
 	
 	\subsubsection{\ac{DP-SGD}}
+	\placeholder{swap local vs global and dpsgd}
 	
 	\ac{DP-SGD} is a modification to the standard \ac{SGD} algorithm introduced by Abadi et al.~\cite{abadi2016deep} in 2016 to integrate \ac{DP} into deep learning frameworks. It enhances \ac{SGD} by clipping the computed gradient to a fixed norm and adding calibrated (Gaussian) noise before performing an update step. The algorithm pseudocode as proposed by Abadi et al. is shown in figure \ref{fig:dpsgdpseudocode}.
 	
@@ -198,7 +203,7 @@
 	
 	FLTrust~\cite{cao2021fltrust} was introduced by Cao et al. in 2020 and mitigates malicious updates through trust scores. These are obtained by calculating the cosine similarity of the local update to an update anchor computed on a small root dataset held by the server. The method relies on the assumption that the server has access to a dataset representing the general data distribution across all clients.
 	
-	\subsection{Performance: Communication Efficiency}
+	\subsection{Communication Efficiency}
 	Another practical limitation especially in mobile applications is the available bandwidth to transmit local updates to the aggregator. We therefore include a method to communicate sparse instead of dense updates.
 	
 	\subsubsection{Top-$k$ Gradient Sparsification}
@@ -227,7 +232,7 @@
 	
 	The same authors proposed the aggregation schemes SMEA and CAF, which match this theoretical lower bound. However, both methods incur a runtime complexity that scales cubically with the model dimension, rendering them impractical for large-scale models. Furthermore, the runtime of SMEA grows exponentially with the number of tolerated Byzantine adversaries, making it infeasible in realistic federated learning settings.
 	
-	The term $\frac{d}{\varepsilon^2 n}$ in \ref{lowerBoundTheory} further relates the model dimension $d$ to the communication cost and achievable estimation error. Consequently, maintaining accuracy for high-dimensional models requires either relaxing privacy guarantees or integrating a larger number of participating clients.
+	The term $\frac{d}{\varepsilon^2 n}$ in Equation~\ref{lowerBoundTheory} further relates the model dimension $d$ to the communication cost and achievable estimation error. Consequently, maintaining accuracy for high-dimensional models requires either relaxing privacy guarantees or integrating a larger number of participating clients.
 	
 	
 	\subsubsection{Empirical Evidence of Compounding}
@@ -260,16 +265,22 @@
 	
 	\paragraph{Performance.}
 
-	The performance metric includes test accuracy on held-out data, communication cost (bytes sent per client per round), and wall-clock training time. These metrics collectively assess the trade-off between model utility, resource efficiency, and computational feasibility in decentralized learning systems.
+	The performance metric includes communication cost (bytes sent per client per round), and wall-clock training time. These metrics collectively assess the trade-off between resource efficiency, and computational feasibility in decentralized learning systems.
 	
 	\subsection{Trilemma Visualization}
 	
-	\placeholder{%
-		Radar / simplex chart positioning each of the 8 configurations relative to the
-		three axes, analogous to Figure~1 of~\cite{allouah2023balancing}.
-		Include actual figure once results are available.%
-	}
+	The values of the three trilemma axes are computed as follows, each yielding a value in the range $[0,1]$, where 0 denotes no effect and 1 the maximum attainable effect:
+	\begin{align*}
+		&\text{Privacy} = \max\left(0,\frac{\varepsilon_{\max}-\varepsilon}{\varepsilon_{\max}}\right)\\
+		&\text{Robustness} = 1-\Delta_{acc}\\
+		&\text{Efficiency} = \alpha\times\frac{t_{base}}{t}+(1-\alpha)\times\frac{b_{base}-b}{b_{base}}
+		\label{eq:trilemma_formula}
+	\end{align*}
 	
+	Here, $\varepsilon$ denotes the privacy budget, $\Delta_{acc}$ the accuracy gap induced by the Byzantine attack, $t$ the wall-clock training time per client and communication round, and $b$ the number of bytes transmitted per client and communication round. The reference values $t_{base}$ and $b_{base}$ correspond to the wall-clock training time and transmitted bytes of the baseline configuration, respectively.
+	
+	The weighting parameter $\alpha$ determines the relative contribution of computation time and communication cost to the efficiency axis and can be adjusted to match the requirements of a target deployment. Unless stated otherwise, $\alpha=0.5$ is used to assign equal weight to both components.
+
 	% --------------------------------------------------
 	\section{Methods}
 	\label{sec:method}
@@ -407,14 +418,13 @@
 	\section{Results}
 	\label{sec:results}
 	% --------------------------------------------------
-	This section summarizes the experimental results. The final round accuracy over all configurations is reported in Figure~\ref{fig:bars_acccc}.
+	This section summarizes the experimental results. The final round accuracy over all configurations is reported in Figure~\ref{fig:bars_acc_exp1}.
 	\subsection{Baseline Reproduction (RQ1 -- Sanity Check)}
 	
-	\placeholder{%
-		FedAvg and FLTrust baselines on MNIST vs.\ published BLADES numbers;
-		table: our accuracy / ASR vs.\ reported values; discussion of any deviations.%
-	}
+	Training a clean FedAvg model using only honest clients on the MNIST dataset yielded a final accuracy of 98\%, slightly below the 99\% reported in the original FedAvg paper~\cite{mcmahan2017fedavg}.
 	
+	The original FLTrust paper reported an accuracy of 99.6\% on the MNIST dataset for both clean FedAvg training and training under attack when FLTrust was enabled. In our experiments, enabling FLTrust achieved a final accuracy of 98\%, matching the performance of the clean FedAvg baseline. Although the absolute accuracy is lower than that reported by the original authors, our results likewise indicate that FLTrust effectively mitigates the label-flipping attack under the considered experimental setting.
+
 	
 	\subsection{Isolation: Individual Mechanism Costs (RQ1)}
 	
@@ -423,12 +433,13 @@
 	\subsubsection{\ac{DP-SGD} Cost}
 	\placeholder{review}
 	
-	\paragraph{Training in 50 rounds of one full epoch each.}
-	The replacement of pure \ac{SGD} with \ac{DP-SGD} on the clients results in an accuracy loss of 0.2 compared to the baseline and an increase in training time of TODO
+	\paragraph{Training time.}
+	The replacement of pure \ac{SGD} with \ac{DP-SGD} on the clients results in an increase in training time. This effect is stronger for stricter privacy budgets as depicted in Figure~\ref{fig:duration_by_client_number}.
 	
+	\paragraph{Final accuracy.}
+	Regarding the model performance, all conducted experiments report an accuracy loss of $\approx 0.2$ compared to the baseline (see Figures~\ref{fig:bars_acc_exp1} and \ref{fig:bars_accexp2}).
 	Contrary to our expectations, the assigned privacy budget does not have a major influence on the accuracy besides the general degradation observed when applying \ac{DP-SGD}: We achieve similar performance for all $\varepsilon \in [1;5;10;25]$. Figure~\ref{fig:DP_acc} shows a slight variation in the early rounds but overall a similar evolution for all values of $\varepsilon$.
 	
-	\paragraph{Training in 500 rounds of 10 batches each.}
 	
 	
 	\subsubsection{FLTrust}
@@ -439,41 +450,11 @@
 	
 	\paragraph{Cost.}
 	\placeholder{extend once results are available}
-	
-	
-	\paragraph{Development of trust scores.}
-	Figure~\ref{fig:trustscores_over_rounds} illustrates the evolution of the trust scores throughout training. The first chart, corresponding to the isolated FLTrust configuration, shows a clear separation between honest and malicious clients. Honest clients start with trust scores of approximately 0.9, which gradually decrease after roughly 15 rounds before stabilizing around 0.3. Malicious clients start near 0.7, exhibit a brief increase, and then decline sharply to 0 after approximately 25 training rounds.
-	
-	One possible explanation for the gradual decline in the trust scores of honest clients is that differences between the local training datasets become increasingly influential once the model has learned the general structure of the data. Consequently, honest updates remain broadly aligned with the root dataset but become progressively more diverse, whereas the poisoned and scaled updates of malicious clients deviate from the server update anchor and are therefore assigned trust scores close to zero.
-	
-	\paragraph{Interaction of trust scores and batches processed per round.}
-	\label{batches_per_round_trustscores}
-	
-	Table~\ref{tab:trustScoresBatches} summarizes the effect of the number of locally processed batches per communication round on the final model accuracy and the evolution of the trust scores assigned to honest and malicious clients. Processing an entire local epoch per round yields the highest model accuracy but causes the trust scores of honest clients to converge toward zero during later training stages. In contrast, processing only a single batch per round, as proposed by the original authors, results in substantial overlap between the trust scores of honest and malicious clients, reducing the effectiveness of FLTrust and leading to significantly lower accuracy.
-	
-	Processing 5--20 batches per round preserves a clear separation between honest and malicious trust scores while maintaining high model accuracy. Among these configurations, 10 batches per round provide a favorable trade-off and are therefore used throughout the remainder of this work.
-	
-	
-	\begin{table*}[!ht]
-		\centering
-		    \begin{tabular}{|l|l|l|l|l|}
-			\hline
-			\textbf{Local steps / round} & \textbf{Rounds} & \textbf{Accuracy} & \textbf{Honest trust score (late training)} & \textbf{Malicious trust score} \\ \hline
-			Full epoch & 300 & 0.986 & 0.016 (collapsed to 0 after $\approx100$ rounds) & 0.000 \\ \hline
-			1 & 300 & 0.782 & 0.450 (high, strongly fluctuating) & 0.325 (overlaps with honest) \\ \hline
-			5 & 600 & 0.946 & 0.02–0.22 (stable, non-collapsing) & 0.000 \\ \hline
-			10 & 600 & 0.969 & 0.05–0.19 (stable, non-collapsing) & 0.000 \\ \hline
-			20 & 600 & 0.968 & 0.02–0.21 (stable, non-collapsing) & 0.000 \\ \hline
-		\end{tabular}
-		\caption{Summary of the evolution of trust scores for honest and malicious clients during late training (after 250+ rounds).}
-		\label{tab:trustScoresBatches}
-	\end{table*}
-
 
 	\subsubsection{Top-$k$ Sparsification Cost}
 	\placeholder{Accuracy, bytes per round, and wall-clock time for $k \in \{1\%,10\%\}$. REVIEW}
 	\paragraph{Effect.}
-	Applying Top-k sparsification yields EFFECT GOES HERE
+	Applying Top-k sparsification yields the expected savings in bandwidth, modeled here by measuring the bytes transferred per client per round. The results are visualized in Figure~\ref{fig:bytes_per_round}, confirming a reduction of $100-2k\%$. The factor of two comes from the necessity to transfer also the indices of the transferred bytes, rendering all $k\ge50$ impractical for saving bandwidth.
 	
 	\paragraph{Cost.}
 	We do not observe a significant decline in performance when applying Top-k sparsification to the MNIST training process. Cutting down to transferring only the top 1\% of the gradient yields a slight loss in accuracy, but not a noticeable effect.
@@ -495,9 +476,13 @@
 	\placeholder{check when results}
 	
 	\paragraph{Cost.}
-	Combining \ac{DP-SGD} with FLTrust results in a substantial decline in model accuracy, reducing performance to only slightly above random guessing. Figure~\ref{fig:confusion_DP+FLTRUST} shows the confusion matrix of the final model, revealing that it predicts only two classes.
+	\placeholder{review}
+	Combining \ac{DP-SGD} with FLTrust results in a substantial decline in model accuracy when training full epochs per round, reducing performance to only slightly above random guessing. Figure~\ref{fig:confusion_DP+FLTRUST} shows the confusion matrix of the final model, revealing that it predicts only two classes.
 	
 	These results are consistent with the super-additive interaction between privacy and Byzantine robustness derived by Allouah et al. Intuitively, the noise introduced for differential privacy causes client updates to deviate from the anchor update computed on the root dataset, resulting in uniformly low trust scores. This behavior is reflected in the second chart of Figure~\ref{fig:trustscores_over_rounds}.
+	
+	When reducing the local training steps to 10 batches per round (final accuracies available in Figure~\ref{fig:bars_accexp2}), the decline is surprisingly soft, surpassing the results of \ac{DP} alone and showcasing the same accuracy gap against the FLTrust-only results as the \ac{DP}-only config did against the base configuration
+	Contrary to our expectations, for the combination of FLTrust and \ac{DP}, stricter privacy guarantees ($\varepsilon=1$) led to even better accuracy than more relaxed ones ($\varepsilon=10$), resulting in accuracy gaps down to $\Delta_{acc}=0.05$ compared to the honest FedAvg setting.
 	
 	\paragraph{Influence of the $\varepsilon$ value.}
 	Although model performance varies slightly with $\varepsilon$, even the relaxed setting of $\varepsilon = 25$ does not achieve an accuracy above 0.2. The most pronounced effect is shown in Figure~\ref{fig:DP+FLTRUST_acc}, which illustrates the accuracy throughout training. While configurations with $\varepsilon \in {5,10,25}$ reach a peak accuracy of approximately 0.2 after 35, 25, and 15 training rounds, respectively, the configuration with $\varepsilon = 1$ never exceeds an accuracy of 0.12, indicating substantially slower convergence.
@@ -529,6 +514,38 @@
 		does the compounding pattern hold across both?%
 	}
 	
+	\subsection{Trust and Privacy: FlTrust scores (RQ3)}
+	This section reports the findings related to the trust scores computed during the FLTrust aggregation.
+	
+	\paragraph{Development of trust scores.}
+	Figure~\ref{fig:trustscores_over_rounds} illustrates the evolution of the trust scores throughout training. The first chart, corresponding to the isolated FLTrust configuration, shows a clear separation between honest and malicious clients. Honest clients start with trust scores of approximately 0.9, which gradually decrease after roughly 15 rounds before stabilizing around 0.3. Malicious clients start near 0.7, exhibit a brief increase, and then decline sharply to 0 after approximately 25 training rounds.
+	
+	One possible explanation for the gradual decline in the trust scores of honest clients is that differences between the local training datasets become increasingly influential once the model has learned the general structure of the data. Consequently, honest updates remain broadly aligned with the root dataset but become progressively more diverse, whereas the poisoned and scaled updates of malicious clients deviate from the server update anchor and are therefore assigned trust scores close to zero.
+	
+	\paragraph{Interaction of trust scores and batches processed per round.}
+	\label{batches_per_round_trustscores}
+	
+	Table~\ref{tab:trustScoresBatches} summarizes the effect of the number of locally processed batches per communication round on the final model accuracy and the evolution of the trust scores assigned to honest and malicious clients. Processing an entire local epoch per round yields the highest model accuracy but causes the trust scores of honest clients to converge toward zero during later training stages. In contrast, processing only a single batch per round, as proposed by the original authors, results in substantial overlap between the trust scores of honest and malicious clients, reducing the effectiveness of FLTrust and leading to significantly lower accuracy.
+	
+	Processing 5--20 batches per round preserves a clear separation between honest and malicious trust scores while maintaining high model accuracy. Among these configurations, 10 batches per round provide a favorable trade-off and are therefore used in the second experimental setup.
+	For the full-epoch variant, the training rounds are limited to 50 to avoid the collaps of the trust scores for honest clients.
+	
+	\begin{table*}[!h]
+		\centering
+		
+		\begin{tabularx}{\textwidth}{|l|l|l|X|X|}
+			\hline
+			\textbf{Local steps / round} & \textbf{Rounds} & \textbf{Accuracy} & \textbf{Honest trust score (late training)} & \textbf{Malicious trust score} \\ \hline
+			Full epoch & 300 & 0.986 & 0.016 (collapsed to 0 after $\approx100$ rounds) & 0.000 \\ \hline
+			1 & 300 & 0.782 & 0.450 (high, strongly fluctuating) & 0.325 (overlaps with honest) \\ \hline
+			5 & 600 & 0.946 & 0.02–0.22 (stable, non-collapsing) & 0.000 \\ \hline
+			10 & 600 & 0.969 & 0.05–0.19 (stable, non-collapsing) & 0.000 \\ \hline
+			20 & 600 & 0.968 & 0.02–0.21 (stable, non-collapsing) & 0.000 \\ \hline
+		\end{tabularx}
+		\caption{Summary of the evolution of trust scores for honest and malicious clients during late training (after 250+ rounds).}
+		\label{tab:trustScoresBatches}
+	\end{table*}
+	
 	% --------------------------------------------------
 	\section{Discussion}
 	\label{sec:discussion}
@@ -542,17 +559,7 @@
 		configuration pair; intuition for why DP clipping and FLTrust cosine clipping
 		interact destructively.%
 	}
-	
-	\subsection{Mitigation: Joint Clipping-Norm Calibration (RQ3)}
-	
-	\placeholder{%
-		Heuristic: jointly set DP clipping norm $C$ and FLTrust trust threshold to
-		minimize redundant gradient suppression;
-		description of the calibration procedure;
-		results vs.\ uncalibrated worst-case combination;
-		formal guarantee preservation argument.%
-	}
-	
+
 	\subsection{Practical Recommendations}
 	
 	\placeholder{%
@@ -600,7 +607,7 @@
 	
 	Furthermore the experimental setup should be extended to encompass a broader range of methods (e.g., Krum, SMEA, CAF for aggregation) and evaluate stronger adversarial scenarios, such as model poisoning attacks described by Fang et al.\cite{fang2020poisoning}. Additionally, exploring reparametrization techniques such as the Low-Rank-adaptation method proposed by Liu et al.\cite{liu2025dplora} could provide insights into balancing efficiency and privacy in \ac{FL} systems. 
 	
-	Other promising directions include testing alternative threat models (e.g., malicious servers, collusion between malicious clients and servers), or introducing data heterogeneity through artificially distributed datasets. These extensions would better reflect real-world complexities and enable more robust comparisons across methodologies.
+	Other promising directions include testing alternative threat models (e.g., malicious servers, collusion between malicious clients and servers), or introducing data heterogeneity through artificially skewed dataset distributions. These extensions would better reflect real-world complexities and enable more robust comparisons across methodologies.
 	
 	% --------------------------------------------------
 	\section{Conclusion}
@@ -621,60 +628,84 @@
 	\bibliographystyle{IEEEtran}
 	\bibliography{bib.bib}
 	\clearpage
-	
+	\onecolumn
 	\section{APPENDIX}
+	\FloatBarrier
+	\begin{figure}[h]
+		\centering
+		\includegraphics[width=0.7\linewidth]{img/bytes_per_client.png}
+		\caption{Bytes transferred per client per round for settings with different Top-k sparsification thresholds.}
+		\label{fig:bytes_per_round}
+	\end{figure}
 	\subsection{Experimental run on MNIST dataset with 50 rounds of full epochs trained, $n=50, \eta=40\%$, attack scale = 2.0}
 	\FloatBarrier
 	
 	\begin{figure}[h]
-		\includegraphics[width=0.9\linewidth]{img/MNIST_07-10/confusion_matrix_BASE}
+		\centering
+		\includegraphics[width=0.5\linewidth]{img/MNIST_07-10/confusion_matrix_BASE}
 		\caption{Final confusion matrices for standard FedAvg .}
 		\label{fig:confusion_matrix_base}
 	\end{figure}
 	
 	\begin{figure}[h]
-		\includegraphics[width=0.9\linewidth]{img/MNIST_07-10/confusion_matrix_FLTRUST.png}
+		\centering
+		\includegraphics[width=0.5\linewidth]{img/MNIST_07-10/confusion_matrix_FLTRUST.png}
 		\caption{Final confusion matrices for FLTrust config.}
 		\label{fig:confusion_matrix_fltrust}
 	\end{figure}
 	
 	\begin{figure}[h]
-		\includegraphics[width=0.9\linewidth]{img/MNIST_07-10/confusion_matrix_DP+FLTRUST.png}
+		\centering
+		\includegraphics[width=0.5\linewidth]{img/MNIST_07-10/confusion_matrix_DP+FLTRUST.png}
 		\caption{Final confusion matrix for the DP+FLTrust configuration.}
 		\label{fig:confusion_DP+FLTRUST}
 	\end{figure}
 	
-	\begin{figure*}
+	\begin{figure}
 		\includegraphics[width=\textwidth]{img/MNIST_07-10/label_distribution.png}
 
 		\caption{Label distribution of the root dataset used for FLTrust and the client training datasets. The root dataset was sampled uniformly across all classes, while the client datasets were sampled randomly.}
 		\label{fig:labeldistr}
-	\end{figure*}
+	\end{figure}
 	
-	\begin{figure*}
+	\begin{figure}
 		\includegraphics[width=\textwidth]{img/MNIST_07-10/bar_accuracy_bars.png}
 		\includegraphics[width=\textwidth]{img/MNIST_07-10/bar_accuracy_legend.png}
 		\caption{Final accuracy achieved on all different configurations.}
-		\label{fig:bars_acccc}
-	\end{figure*}
+		\label{fig:bars_acc_exp1}
+	\end{figure}
 	
-	\begin{figure*}
+	\begin{figure}
 		\includegraphics[width=\textwidth]{img/MNIST_07-10/per_config_line_charts/line_chart_config_2.png}
 		\caption{Accuracy over training rounds for DP-only configuration.}
 		\label{fig:DP_acc}
-	\end{figure*}
+	\end{figure}
 	
-	\begin{figure*}
+	\begin{figure}
 		\includegraphics[width=\textwidth]{img/MNIST_07-10/per_config_line_charts/line_chart_config_5.png}
 		\caption{Accuracy per training round for DP+FLTrust configuration.}
 		\label{fig:DP+FLTRUST_acc}
-	\end{figure*}
+	\end{figure}
 	
-	\begin{figure*}
+	\begin{figure}
 		\includegraphics[width=\textwidth]{img/MNIST_07-10/trust_over_rounds_per_config.png}
 		\caption{The line charts depict the average trust scores of honest and malicious clients during the training rounds. While for settings where \ac{DP} is enabled the scores are consistently equally low, the settings without \ac{DP}-related noise addition show a clear distinction.}
 		\label{fig:trustscores_over_rounds}
-	\end{figure*}
+	\end{figure}
 	\FloatBarrier
 	\subsection{Experimental run on MNIST dataset with 500 rounds of 10 SGD steps each, $n\in\{10,30,60\}, \eta=20\%$, attack scale = 2.0}
+	
+	\begin{figure}[h]
+		\centering
+		\includegraphics[width=\textwidth]{img/MNIST_07-12/bar_accuracy.png}
+		\includegraphics[width=\textwidth]{img/MNIST_07-12/bar_accuracy_legend.png}
+		\caption{Final accuracy achieved on all different configurations.}
+		\label{fig:bars_accexp2}
+	\end{figure}
+	
+	\begin{figure}
+		\includegraphics[width=\linewidth]{img/MNIST_07-12/duration_per_config.png}
+		\caption{The full training duration for varying numbers of clients.}
+		\label{fig:duration_by_client_number}
+	\end{figure}
 \end{document}
