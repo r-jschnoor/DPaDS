@@ -50,7 +50,7 @@ Parameters to test in a series run: ds(mnist), Eps(1,(5),10), topk(0.01,0.1,(0.5
 -----
 
 ### What to do next
-1. Currently the confusion matrix plot generalizes over the results and takes only one of each config. Change this to generate one matrix for each result json. Those should be placed in confusion_matrices/<config>/<nice_descripive_filename> (a double subfolder in the respective folder. Similar to e.g. f1_tables but one folder deeper). Similar to this, the f1_charts also need to be updated.
+1. 
 
 
 ### How to get to computation ressources
