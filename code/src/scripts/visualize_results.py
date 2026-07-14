@@ -860,7 +860,7 @@ def visualize_radar_chart(folder: str) -> None:
         if not config["use_topk"]:
             normalized_result_scores[result["_filename"]][EFFICIENCY_KEY] = 0.0
         else:
-            normalized_result_scores[result["_filename"]][EFFICIENCY_KEY] = 1 - config["topk_ratio"]
+            normalized_result_scores[result["_filename"]][EFFICIENCY_KEY] = 1 - config["topk_ratio"] 
             
 
 

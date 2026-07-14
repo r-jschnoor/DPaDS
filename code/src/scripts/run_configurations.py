@@ -18,7 +18,7 @@ from src.server import run_simulation_with_config, resolve_device
 # regardless of the cwd the script happens to be invoked from.
 RESULTS_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "results"))
 
-DEFAULT_DATASET = "mnist"   # "mnist" or "cifar10" -> same dataset for every config in a run, edit here to switch it.
+DEFAULT_DATASET = "cifar10"   # "mnist" or "cifar10" -> same dataset for every config in a run, edit here to switch it.
 DEFAULT_MAX_CPUS = 25
 DEFAULT_MAX_GPU_CLIENTS = 4   # Only applies for dataset="cifar10" (see resolve_device()
                               # in server.py) -- caps how many simulated clients share
@@ -29,7 +29,7 @@ DEFAULT_GPU_INDEX = 0         # None -> auto-pick the GPU with most free VRAM.
 SHARED_PARAMS = dict(
     dataset = DEFAULT_DATASET,
     num_clients = 50,
-    num_rounds = 250,
+    num_rounds = 400,
     num_byzantine = 20,   # byzantine_fraction = num_byzantine/num_clients = 0.4
     root_dataset_size = 2000,
     rescale_to_ref_norm = False,

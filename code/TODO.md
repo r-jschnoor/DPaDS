@@ -3,8 +3,13 @@
 - Refactor redundancy
 
 - Analyze the three axes of the trilemma triangle and propose improvements to the calculation of each metric (robusness, privacy, efficiency). Then Trilemma Triangle chart update how edges are computed (see README.md)
+    - Privacy: max(0, (eps_max - eps_x)/eps_max)
+    - Robustness: max(1, 1 - delta_accuracy) (delta_accuracy = clean_accuracy - actual_accuracy_x)
+    - Efficiency: (set alpha 0.5, t = runtime of config, bytes = bytes per client per round, base = no attack config 1, x = current run results) -> alpha * t_base/t_x + (1-alpha)*((bytes_base-bytes_x)/bytes_base)
 
 
+
+- Write Setup section 5.5 in report (hardware and software stack)
 
 -----
 
@@ -20,13 +25,12 @@
 Parameters to test in a series run: ds(mnist), Eps(1,(5),10), topk(0.01,0.1,(0.5)), clients(10,30,60,(80,100)), configs(1-8) --> 2x2x3x8=92 || 3x3x5x8=360
 
 1. Run ohne attack mit BASE config (DONE)
-2. Run Eps(1,10), topk(0.01), clients(10,30,60), configs(4,6-8) (Currently running)
+2. Run Eps(1,10), topk(0.01), clients(10,30,60), configs(4,6-8) (DONE)
+3. Run ds(mnist), Eps(1,10), topk(0.01,0.1), clients(10,30,60), configs(1-8), num_rounds(250), byzantine-frac(0.4) (Currently running)
 
-3. Run ds(mnist), Eps(1,10), topk(0.01,0.1), clients(10,30,60), configs(1-8), num_rounds(250), byzantine-frac(0.4)
+4. Run ds(cifar), Eps(1,10), topk(0.01,0.1), clients(10,30,60), configs(1-8), num_rounds(400), byzantine-frac(0.4)
 
-4. Run ds(cifar), Eps(1,10), topk(0.01,0.1), clients(10,30,60), configs(1-8)
-
-5. Run Eps(1,10), topk(0.01,0.1), clients(80), configs(1-8)
+5. Run Eps(1,10), topk(0.01,0.1), clients(80), configs(1-8), num_rounds(250), byzantine-frac(0.4)
 
 
 ### Optional runs when time allows
