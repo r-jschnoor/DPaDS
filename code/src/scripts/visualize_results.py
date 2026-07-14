@@ -1677,7 +1677,7 @@ def visualize_bytes_per_client_topk(folder: str) -> None:
             sparsified = topk_sparsify(dummy_update, k)
             bytes_per_ratio.append(update_size_bytes(None, use_topk=True, sparsified_update=sparsified))
 
-    kb_per_ratio = [b / 1024 for b in bytes_per_ratio]
+    kb_per_ratio = [b / 1000 for b in bytes_per_ratio]  # decimal KB, not KiB
 
     os.makedirs(folder, exist_ok=True)
     fig, ax = plt.subplots(figsize=(8, 5))
