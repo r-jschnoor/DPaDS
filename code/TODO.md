@@ -50,7 +50,7 @@ Parameters to test in a series run: ds(mnist), Eps(1,(5),10), topk(0.01,0.1,(0.5
 -----
 
 ### What to do next
-1. 
+1. I need a glossar for the report (under latex/report). Please analyze the report throughly and propose tokens that would be needed in a glossary. Dont write anything into file for now. Please just propose tokens and afterwards we discuss the feasablity of each and then discuss the going forward. 
 
 
 ### How to get to computation ressources
@@ -65,3 +65,39 @@ Parameters to test in a series run: ds(mnist), Eps(1,(5),10), topk(0.01,0.1,(0.5
 
 ## Notes on the Report
 - 
+
+
+
+## Possible glossary entries
+- Global model
+- Local model
+- Communication round
+- Local (SGD) step
+- Local epoch
+- Local DP
+- Central DP
+- Privacy budget
+- (Failure probability) - Ist halt soweit ich das sehen kann aus nem anderen Paper aber vlt trotzdem nen kurzen remark schreiben?
+- Gradient clipping
+- (Noise multiplier) - Ziemlich selbsterklärend aber der vollständigkeit halber?
+- Privacy accounting -> Claude meint hier folgendes: "the report never explains how $\varepsilon$ accumulates over rounds, but the whole DP-SGD section presumes the reader knows"
+- Byzantine adversary
+- Byzantine fraction
+- Honest client
+- Malicious client
+- Trust score
+- Root Dataset
+- Update anchor
+- (Cosine similarity) - Ist ein standart aber auch der vollständigkeit halber?
+- Label-flipping attack
+- Attack scale -> Der scaling factor
+- Sparsification ratio
+- (Communication cost) - Wird auch erklärt aber nochmal in der Übersicht?
+- Accuracy gap
+- Privacy score
+- Robustness score
+- Efficiency score
+- (additive/sub-additive/super-additive) - weiß nicht ob man das definieren muss aber wäre auch der vollständigkeit halber
+
+#### Eher Acronym
+- FedAvg 
