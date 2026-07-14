@@ -8,11 +8,12 @@
     - Efficiency: (set alpha 0.5, t = runtime of config, bytes = bytes per client per round, base = no attack config 1, x = current run results) -> alpha * t_base/t_x + (1-alpha)*((bytes_base-bytes_x)/bytes_base)
 
 
+- On bar chart there is no info on number of clients per config so e.g. config one has same params (written on plot) for all bars!! 
 
 
 - Write Setup section 5.5 in report (hardware and software stack)
 - Glossar
-- Link to Repo
+- Link to Repo (Clone to clean repo with only code)
 
 
 
@@ -60,4 +61,4 @@ Parameters to test in a series run: ds(mnist), Eps(1,(5),10), topk(0.01,0.1,(0.5
 
 
 ## Notes on the Report
-- Introduction: Still mentions "Privacy–Robustness–Performance" instead of Efficiency?
+- 
