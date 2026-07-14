@@ -7,6 +7,9 @@
     - Robustness: max(1, 1 - delta_accuracy) (delta_accuracy = clean_accuracy - actual_accuracy_x)
     - Efficiency: (set alpha 0.5, t = runtime of config, bytes = bytes per client per round, base = no attack config 1, x = current run results) -> alpha * t_base/t_x + (1-alpha)*((bytes_base-bytes_x)/bytes_base)
 
+- Per config line chart misses parameters (e.g. see full-grid-run-combined config-1)
+- Confusion matrices and f1, one plot per result file
+
 
 
 - Write Setup section 5.5 in report (hardware and software stack)
