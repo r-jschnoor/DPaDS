@@ -170,10 +170,15 @@
 	
 	The failure probability $\delta$, introduced by Dwork et al.~\cite{privacy_delta}, denotes the probability that the plain $\varepsilon$-\ac{DP} is broken and should be chosen smaller than the inverse size of the local dataset.
 	
-	\subsubsection{\ac{DP-SGD}}
-	\placeholder{swap local vs global and dpsgd}
+	\paragraph{Central vs.\ Local \ac{DP} in FL.}
 	
-	\ac{DP-SGD} is a modification to the standard \ac{SGD} algorithm introduced by Abadi et al.~\cite{abadi2016deep} in 2016 to integrate \ac{DP} into deep learning frameworks. It enhances \ac{SGD} by clipping the computed gradient to a fixed norm and adding calibrated (Gaussian) noise before performing an update step. The algorithm pseudocode as proposed by Abadi et al. is shown in figure \ref{fig:dpsgdpseudocode}.
+	In central DP, the server adds noise after aggregating the client updates. This setting assumes a trusted aggregator while protecting the aggregated updates before they are shared with third parties.
+	
+	In the considered setting, client updates must be protected against inference attacks by the aggregator or adversaries eavesdropping on the client--server communication, requiring local \ac{DP}. To achieve this, each client adds noise to its update before transmission. Since the noise added by individual clients accumulates during aggregation, local \ac{DP} requires a higher effective noise magnitude and therefore incurs a greater loss in accuracy.
+	
+	\paragraph{\ac{DP-SGD}.}
+	
+	\ac{DP-SGD} is a modification to the standard \ac{SGD} algorithm introduced by Abadi et al.~\cite{abadi2016deep} in 2016 to integrate local \ac{DP} into deep learning frameworks. It enhances \ac{SGD} by clipping the computed gradient to a fixed norm and adding calibrated (Gaussian) noise before performing an update step. The algorithm pseudocode as proposed by Abadi et al. is shown in figure \ref{fig:dpsgdpseudocode}.
 	
 	\begin{figure}
 		\includegraphics[width=\linewidth]{img/DP_SGD_pseudocode}
@@ -181,45 +186,36 @@
 		\label{fig:dpsgdpseudocode}
 	\end{figure}
 	
-	\subsubsection{Central vs.\ Local \ac{DP} in FL}
-	
-	In central DP, the server adds noise after aggregating the client updates. This setting assumes a trusted aggregator while protecting the aggregated updates before they are shared with third parties.
-	
-	In the considered setting, client updates must be protected against inference attacks by the aggregator or adversaries eavesdropping on the client--server communication, requiring local \ac{DP}. To achieve this, each client adds noise to its update before transmission. Since the noise added by individual clients accumulates during aggregation, local \ac{DP} requires a higher effective noise magnitude and therefore incurs a greater loss in accuracy.
 	
 	\subsection{Robustness: Byzantine-Tolerant Aggregation}
 	This section introduces the Byzantine fault model and presents two aggregation schemes designed to mitigate the effects of Byzantine adversaries.
 	
-	\subsubsection{Byzantine Fault Model}
+	\paragraph{Byzantine Fault Model.}
 	Byzantine Fault Tolerance is a property of a distributed system that allows for the system to stay operational while some components fail or act maliciously.
 	
 	A $\eta$-fraction Byzantine adversary means that $\eta$\% of the clients are acting maliciously. In the conducted experiments, malicious behavior means communicating manipulated gradients to poison the central model, e.g. insert a backdoor, degrade the general performance or enable label flipping attacks.
 	
-	\subsubsection{Krum}
+	\paragraph{Krum.}
 	
 	Krum~\cite{Krum}, proposed by Blanchard et al. in 2017, enhances robustness to Byzantine adversaries by selecting updates closest to their XX neighbors, effectively focusing on the densest cluster of updates of size XX. This ensures the training process is provably Byzantine-tolerant but relies on the assumption that honest updates cluster together, which only holds when data distributions across clients are similar. Under data heterogeneity, this assumption breaks down, leading to performance degradation because honest updates may be discarded if they deviate significantly from the majority.
 	
-	\subsubsection{FLTrust}
+	\paragraph{FLTrust.}
 	
 	FLTrust~\cite{cao2021fltrust} was introduced by Cao et al. in 2020 and mitigates malicious updates through trust scores. These are obtained by calculating the cosine similarity of the local update to an update anchor computed on a small root dataset held by the server. The method relies on the assumption that the server has access to a dataset representing the general data distribution across all clients.
 	
 	\subsection{Communication Efficiency}
 	Another practical limitation especially in mobile applications is the available bandwidth to transmit local updates to the aggregator. We therefore include a method to communicate sparse instead of dense updates.
 	
-	\subsubsection{Top-$k$ Gradient Sparsification}
+	\paragraph{Top-$k$ Gradient Sparsification.}
 	
 	Top-$k$ gradient sparsification~\cite{aji2017topk} reduces communication during gradient transmission by retaining only the $k$ largest gradient components, where $k$ is a fixed fraction of the model dimension $d$.
 	
 	Discarding the remaining gradient components inevitably results in information loss, leading to reduced model performance. The extent of this degradation depends on how the optimization information is distributed across the gradient, with models relying on a small number of dominant components generally being less affected than those requiring information from many dimensions.
 	
-	\subsubsection{Relation to Model Dimensionality}
-	
-	The term $d/(\epsilon^2 n)$ in the theoretical lower bound~\cite{allouah2023trilemma} raises the assumption that //TODO
-	
 	\subsection{The Privacy--Robustness--Performance Trilemma}
 	This section first presents the theoretical lower bound of the trilemma and then discusses its implications for empirical evaluation, motivating efficiency as a fundamental third axis.
 		
-	\subsubsection{Theoretical Lower Bound}
+	\paragraph{Theoretical Lower Bound.}
 	
 	Allouah et al.~\cite{allouah2023trilemma} proved that any algorithm simultaneously guaranteeing $\epsilon$-local DP and robustness against an $\eta$-fraction Byzantine adversary incurs a mean estimation error of at least
 	\begin{equation}
@@ -228,14 +224,14 @@
 	\end{equation}
 	This lower bound establishes that the costs of privacy and Byzantine robustness are fundamentally coupled. In particular, the cross-term $\eta/\epsilon^2$ shows that these costs interact multiplicatively rather than additively.
 	
-	\subsubsection{Efficiency Axis Extension}
+	\paragraph{Efficiency Axis Extension.}
 	
 	The same authors proposed the aggregation schemes SMEA and CAF, which match this theoretical lower bound. However, both methods incur a runtime complexity that scales cubically with the model dimension, rendering them impractical for large-scale models. Furthermore, the runtime of SMEA grows exponentially with the number of tolerated Byzantine adversaries, making it infeasible in realistic federated learning settings.
 	
 	The term $\frac{d}{\varepsilon^2 n}$ in Equation~\ref{lowerBoundTheory} further relates the model dimension $d$ to the communication cost and achievable estimation error. Consequently, maintaining accuracy for high-dimensional models requires either relaxing privacy guarantees or integrating a larger number of participating clients.
 	
 	
-	\subsubsection{Empirical Evidence of Compounding}
+	\paragraph{Empirical Evidence of Compounding.}
 	
 	In 2021, Guerraoui et al. empirically investigated the question \textit{"Differential Privacy and Byzantine Resilience in SGD: Do They Add Up?"}~\cite{guerraoui2021differentialprivacybyzantineresilience}. They showed that a naive combination of privacy- and robustness-enhancing methods, namely \ac{DP-SGD} and Minimum-Diameter Averaging (MDA)~\cite{elmhamdi2020genuinelydistributedbyzantinemachine}, leads to unfavorable scaling with the model dimensionality and super-additive performance degradation. These findings support the theoretical results of Allouah et al. and reinforce the need to treat efficiency as a fundamental third axis in future experimental studies.
 
@@ -315,6 +311,7 @@
 	
 	\subsection{Mechanism Interaction Effects}
 	\label{sec:interaction}
+	In this section we outline the expected compounding effects.
 	
 	\paragraph{Performance.}
 	We hypothesize that the clipping and calibrated noise introduced by \ac{DP-SGD} impair the assignment of meaningful trust scores during FLTrust aggregation, thereby slowing convergence and reducing the final model accuracy beyond the individual cost of \ac{DP-SGD}. Furthermore, \ac{DP}-perturbed updates are expected to be more sensitive to Top-$k$ sparsification, as the added noise may increase the magnitude of gradient components that would otherwise be discarded. Consequently, combining multiple mechanisms is expected to incur a super-additive loss in accuracy.
@@ -369,7 +366,6 @@
 
 	
 	\subsection{Parameters}
-\placeholder{review}
 
 	\paragraph{Static.} The following parameters are constant across all experiment runs.
 
@@ -377,7 +373,7 @@
 		\item The client learning rate is fixed at 0.01.
 		\item The number of gradient descend steps taken by each client per round is set to 10, due to the results of analyzing the effect on the model accuracy and evolution of the trust scores described in section~\ref{batches_per_round_trustscores}.
 		\item The initial seed for random processes is fixed to 42 to ensure comparability across runs. Randomizers required to vary between rounds, like training set shuffle or DP noise generation, additionally take the round number as input.
-		\item The attack type is fixed to flip specific labels: Digits 3 and 7 on the MNIST dataset and TODO: CIFAR10
+		\item The attack type is fixed to flip the labels of digits 3 and 7 on the MNIST dataset.
 		\item \ac{DP} failure probability $\delta$ is fixed to 1e-5.
 		\item The root dataset size for FLTrust is fixed to 2000 samples. This is very large compared to the size of 100 samples proposed by the authors.
 	\end{itemize}
@@ -431,7 +427,6 @@
 	This chapter analyzes the cost and effects of the isolated mechanisms compared to the baseline.
 
 	\subsubsection{\ac{DP-SGD} Cost}
-	\placeholder{review}
 	
 	\paragraph{Training time.}
 	The replacement of pure \ac{SGD} with \ac{DP-SGD} on the clients results in an increase in training time. This effect is stronger for stricter privacy budgets as depicted in Figure~\ref{fig:duration_by_client_number}.
@@ -440,21 +435,25 @@
 	Regarding the model performance, all conducted experiments report an accuracy loss of $\approx 0.2$ compared to the baseline (see Figures~\ref{fig:bars_acc_exp1} and \ref{fig:bars_accexp2}).
 	Contrary to our expectations, the assigned privacy budget does not have a major influence on the accuracy besides the general degradation observed when applying \ac{DP-SGD}: We achieve similar performance for all $\varepsilon \in [1;5;10;25]$. Figure~\ref{fig:DP_acc} shows a slight variation in the early rounds but overall a similar evolution for all values of $\varepsilon$.
 	
-	
-	
 	\subsubsection{FLTrust}
-	\placeholder{review, ggf charts on training time??}
 
 	\paragraph{Effect.}
 	Enabling FLTrust improves model accuracy and mitigates the effects of the label-flipping attack, as shown in Figures~\ref{fig:confusion_matrix_base} and~\ref{fig:confusion_matrix_fltrust}. In the baseline model, the targeted digits 3 and 7 are consistently misclassified as each other, whereas enabling FLTrust largely restores correct predictions. The improvement becomes more pronounced with increasing Byzantine fractions and attack scales. The results shown were obtained with a Byzantine fraction of $\eta = 40\%$ and an attack scale of 2.0.
 	
 	\paragraph{Cost.}
-	\placeholder{extend once results are available}
+	The replacement of FedAvg aggregation with FLTrust did not yield a noticeable impact on the wall clock training time.
 
-	\subsubsection{Top-$k$ Sparsification Cost}
-	\placeholder{Accuracy, bytes per round, and wall-clock time for $k \in \{1\%,10\%\}$. REVIEW}
+	\subsubsection{Top-$k$ Sparsification}
+
 	\paragraph{Effect.}
 	Applying Top-k sparsification yields the expected savings in bandwidth, modeled here by measuring the bytes transferred per client per round. The results are visualized in Figure~\ref{fig:bytes_per_round}, confirming a reduction of $100-2k\%$. The factor of two comes from the necessity to transfer also the indices of the transferred bytes, rendering all $k\ge50$ impractical for saving bandwidth.
+	
+	\begin{figure}[h]
+		\centering
+		\includegraphics[width=\linewidth]{img/bytes_per_client.png}
+		\caption{Bytes transferred per client per round for settings with different Top-k sparsification thresholds.}
+		\label{fig:bytes_per_round}
+	\end{figure}
 	
 	\paragraph{Cost.}
 	We do not observe a significant decline in performance when applying Top-k sparsification to the MNIST training process. Cutting down to transferring only the top 1\% of the gradient yields a slight loss in accuracy, but not a noticeable effect.
@@ -463,20 +462,11 @@
 	
 	\subsection{Combination: Pairwise and Full Interactions (RQ2)}
 	
-	\placeholder{%
-		Main results table: 8 configurations $\times$ all metrics;
-		additive vs.\ super-additive cost analysis;
-		focus on \ac{DP}+FLTrust interaction;
-		radar / simplex visualization (Figure~\placeholder{X}).%
-	}
-	
 	This section reports the combinatory effects observed when pairing multiple mechanisms.
-	
+	The full results are available in table TODO
 	\subsubsection{\ac{DP} + Robustness}
-	\placeholder{check when results}
 	
 	\paragraph{Cost.}
-	\placeholder{review}
 	Combining \ac{DP-SGD} with FLTrust results in a substantial decline in model accuracy when training full epochs per round, reducing performance to only slightly above random guessing. Figure~\ref{fig:confusion_DP+FLTRUST} shows the confusion matrix of the final model, revealing that it predicts only two classes.
 	
 	These results are consistent with the super-additive interaction between privacy and Byzantine robustness derived by Allouah et al. Intuitively, the noise introduced for differential privacy causes client updates to deviate from the anchor update computed on the root dataset, resulting in uniformly low trust scores. This behavior is reflected in the second chart of Figure~\ref{fig:trustscores_over_rounds}.
@@ -490,29 +480,20 @@
 
 	
 	\subsubsection{\ac{DP} + Compression}
-	\placeholder{review when results available}
 	
-	Applying Top-$k$ sparsification to updates perturbed by \ac{DP} noise significantly affects model performance, an effect that is not observed in the Top-$k$-only configuration. While $k=50\%$ does not introduce additional degradation beyond that caused by \ac{DP-SGD} alone, smaller values of $k$ substantially reduce the final model accuracy, with $k=1\%$ reaching a peak accuracy of only 0.2.
+	Applying Top-$k$ sparsification to updates perturbed by \ac{DP} noise significantly affects model performance, an effect that is not observed in the Top-$k$-only configuration. While $k=50\%$ does not introduce additional degradation beyond that caused by \ac{DP-SGD} alone, smaller values of $k$ substantially reduce the final model accuracy, with $k=1\%$ reaching a peak accuracy of only 0.2 when training full epochs and 0.27 when reducing that to 10 SGD steps per round.
 	
 	As in the \ac{DP}-only configuration, varying the privacy budget $\varepsilon$ has no noticeable impact on model accuracy.
 	
 	\subsubsection{Robustness + Compression}
-	\placeholder{review with results.}
 	
 	Combining FLTrust with Top-$k$ sparsification largely preserves the individual effects of both methods. Transmitting only 1\% of the gradient results in the same slight reduction in accuracy observed in the Top-$k$-only configuration, while FLTrust provides a comparable improvement in robustness to that achieved with dense updates. Figure~\ref{fig:trustscores_over_rounds} shows that the trust scores exhibit a similar evolution to the dense-update setting.
 	
 	\subsubsection{Full Combination (\ac{DP} + Robustness + Compression)}
-	\placeholder{Worst-case configuration; super-additive compounding quantified.}
 	
-	Combining all three methods reduces model performance to a level comparable to the \ac{DP}+FLTrust configuration. The final accuracy ranges between 0.12 and 0.18, only marginally exceeding random guessing. The resulting confusion matrix is likewise similar to that of the \ac{DP}+FLTrust setting.
+	For full local-epoch training, combining all three methods reduces model performance to a level comparable to that of the \ac{DP}+FLTrust configuration. The final accuracy ranges between 0.12 and 0.18, only marginally exceeding random guessing, and the resulting confusion matrix closely resembles that of the \ac{DP}+FLTrust setting.
 	
-	
-	\subsection{MNIST vs.\ CIFAR-10 Comparison}
-	
-	\placeholder{%
-		How results scale with dataset complexity;
-		does the compounding pattern hold across both?%
-	}
+	Reducing the local training to 10 steps per communication round, however, produces markedly different results. The performance degradation previously observed for Top-1\% sparsification in the \ac{DP}+Top-$k$ configuration no longer occurs when FLTrust is added. Furthermore, the trend of stronger privacy guarantees yielding higher accuracy persists across all evaluated values of $k$. For a configuration with 60 clients, an accuracy of 88\% is achieved with a privacy budget of $\varepsilon = 1$ while transmitting only 1\% of the locally computed gradient components to the server.
 	
 	\subsection{Trust and Privacy: FlTrust scores (RQ3)}
 	This section reports the findings related to the trust scores computed during the FLTrust aggregation.
@@ -547,26 +528,32 @@
 	\end{table*}
 	
 	% --------------------------------------------------
-	\section{Discussion}
-	\label{sec:discussion}
-	% --------------------------------------------------
-	
-	\subsection{Interpretation of Compounding Effects}
-	
-	\placeholder{%
-		Relate empirical findings to the theoretical cross-term $\eta/\epsilon^2$;
-		characterize compounding as additive / sub-additive / super-additive per
-		configuration pair; intuition for why DP clipping and FLTrust cosine clipping
-		interact destructively.%
-	}
+\section{Discussion}
+\label{sec:discussion}
+% --------------------------------------------------
 
-	\subsection{Practical Recommendations}
+	In this section, we compare the experimental results with the hypotheses formulated in Section~\ref{sec:interaction}.
 	
-	\placeholder{%
-		When to prioritize which axis;
-		safe operating region in the trilemma space;
-		guidance on $(\epsilon,k)$ parameter selection given a robustness requirement.%
-	}
+	\paragraph{Influence of the Optimization Schedule on the Interaction of Differential Privacy and FLTrust.}
+	Contrary to our hypothesis, the combination of \ac{DP-SGD} and FLTrust did not generally result in a super-additive decline in performance, but only showed the expected degradation when training in full epochs. For this initial setting, we observed the expected behavior: The trust scores of both honest and malicious clients collapse during the early stages of training, preventing further convergence and limiting the model accuracy to little more than random guessing.
+	
+	One possible explanation is that, during full local epochs, the client models drift apart, causing the updates to naturally become more dissimilar. The addition of privacy-preserving noise further amplifies this drift, resulting in the collapse of the trust scores. With fewer local optimization steps, client drift remains limited, preserving a higher degree of similarity between honest client updates and the FLTrust anchor update. Consequently, the additional perturbation introduced by differential privacy is no longer sufficient to destroy the trust-score assignment.
+	
+	These findings suggest that the optimization schedule constitutes an important moderating factor in the interaction between differential privacy and Byzantine robustness. While the theoretical lower bound remains valid, the practical severity of the interaction appears to depend strongly on the amount of local optimization performed between communication rounds.
+	
+	\paragraph{Interaction of \ac{DP} and FLTrust.}
+	Enabling FLTrust led to an inversion of the expected decline in performance for stronger privacy guarantees. We did not find a solid explanation for this phenomenon during our experiments and suggest that future work investigate this behavior further. This observation indicates that the interaction between differential privacy and Byzantine robustness may be more complex than suggested by the theoretical lower bound alone.
+	
+	\paragraph{Interaction of Sparsification and \ac{DP}.}
+	As expected, applying aggressive sparsification to gradients perturbed by privacy-preserving noise degrades performance super-additively because the transmitted dimensions are no longer necessarily those carrying the most useful information, but may instead include components whose magnitudes were increased by the added noise.
+	
+	\paragraph{Interaction of FLTrust and Top-$k$ Sparsification.}
+	Sparsifying the gradients prior to transmission did not have a noticeable impact on either the final model accuracy or the trust scores computed during aggregation. A possible explanation is that cosine similarity is largely insensitive to changes in vector magnitude. Since Top-$k$ sparsification preserves the dominant gradient components, the direction of the client updates remains sufficiently similar for FLTrust to assign meaningful trust scores.
+	
+	\paragraph{Evolution of Trust Scores.}
+	The temporal behavior of the trust scores of honest and malicious clients has received little attention in the literature. One possible explanation for the observed dynamics is that, during the early stages of training, the model learns the general structure of the data, resulting in relatively similar client updates. Once the model has captured these global patterns, the honest updates increasingly reflect the characteristics of the individual local datasets and gradually drift apart, causing their trust scores to decrease. At the same time, the influence of the label-flipping attack becomes increasingly dominant in the malicious updates, leading to a collapse of their trust scores.
+
+
 	
 	% --------------------------------------------------
 	\section{Limitations and Future Work}
@@ -574,40 +561,42 @@
 	% --------------------------------------------------
 	
 	\subsection{Limitations}
+	The experiments were conducted under several simplifying assumptions to ensure a manageable experimental setup while establishing a baseline for future research.
 	
-	\placeholder{%
-		Single attack type (label-flipping); single aggregation rule (FLTrust);
-		membership inference approximation (shadow model only);
-		limited $\epsilon$ grid; MNIST/CIFAR-10 may not represent medical/financial FL.%
-	}
-	
-	The experiments in this project were conducted under several simplifications to provide a lightweight anchor for future research. 
 	\paragraph{Simple models and datasets.}
-	The datasets and models selected offer good comparability with existing work but may not fully represent the data analyzed in practical \ac{FL} applications (e.g., financial or medical domains) or complex architectures (e.g., transformer-like models). 
+	The selected datasets and models facilitate comparison with existing work but may not adequately represent the data characteristics and model architectures encountered in practical \ac{FL} applications, such as medical, financial, or transformer-based systems.
 	
-	\paragraph{Limited method coverage.} We evaluated only a single method and at most one attack type per axis. The baseline for membership inference attack success rate was approximated using a shadow model, and the privacy budget was constrained to a limited $\varepsilon$-grid to balance computational feasibility with analytical rigor. 
-	
-	\paragraph{Privacy budget schedule.} The privacy budget was spent uniformly over time, but recent research by Kiani et al.~\cite{kiani2025differentiallyprivatefederatedlearning} suggests that a time-adaptive approach yields better privacy-utility-tradeoffs.
+	\paragraph{Limited method coverage.}
+	Only a single mechanism and, where applicable, a single attack type were evaluated for each axis of the trilemma. Furthermore, the baseline for the membership inference attack success rate was approximated using a shadow model, and the evaluated privacy budgets were limited to a small $\varepsilon$-grid to balance computational feasibility with analytical rigor.
 	
 	\paragraph{FLTrust root dataset size.}
-	The very large size of the root dataset compared to the size proposed in the original paper poses the risk of overstating the reliability of the FLTrust defense mechanism. The experiments should therefore be extended to verify the effect on smaller root datasets.
+	The comparatively large root dataset may overestimate the effectiveness of the FLTrust defense mechanism. The experiments should therefore be extended to investigate the influence of smaller root datasets, as proposed in the original work.
 	
-	\paragraph{Stateless Clients.} The clients do not preserve a state over multiple rounds. In combination with top-k sparsification, this hinders small but repeated updates to accumulate to meaningful contributions over time. Introducing a client state requires well-behaved clients to correctly maintain the state and stay synchronized with the central model, which is realistic for distributed training but not a reasonable assumption in federated learning. Another option is to share the state with the central server, defeating the purpose of the sparsification and introducing new privacy vulnerabilities.
+	\paragraph{Stateless clients.}
+	The clients do not preserve state across communication rounds. In combination with Top-$k$ sparsification, this prevents small but consistent gradient updates from accumulating over time.
+	
+	Introducing client-side state would require honest clients to remain synchronized with the global model. While this assumption is realistic for distributed training, it is difficult to justify in federated learning. Alternatively, maintaining the state on the server would reduce the benefits of sparsification and introduce additional privacy concerns.
+	
+	\paragraph{Privacy budget schedule.}
+	The privacy budget was allocated uniformly across training rounds. However, recent work by Kiani et al.~\cite{kiani2025differentiallyprivatefederatedlearning} suggests that a time-adaptive allocation yields improved privacy--utility trade-offs.
 	
 	\subsection{Future Work}
 	
-	\placeholder{%
-		Extend to Krum, SMEA, CAF aggregators;
-		stronger attacks (model poisoning~\cite{fang2020poisoning});
-		LoRA+DP reparametrization~\cite{liu2025dplora} for the efficiency axis;
-		theoretical tightness of joint calibration heuristic.%
-	}
+	In this section, we derive directions for future research from the open findings and limitations of this work.
 	
-	Future work should aim to expand the detailed analysis to CIFAR-10 and more complex datasets.
+	\paragraph{Investigate the Interaction of \ac{DP} and FLTrust.}
+	Future work should investigate the interaction between \ac{DP} and FLTrust in greater detail, particularly the observed inversion of the influence of the privacy budget on model performance, to determine whether this behavior can be reproduced and quantified in more complex experimental settings. Additionally, the evolution of the trust scores should be analyzed more closely to better understand the mechanisms underlying the observed behavior.
 	
-	Furthermore the experimental setup should be extended to encompass a broader range of methods (e.g., Krum, SMEA, CAF for aggregation) and evaluate stronger adversarial scenarios, such as model poisoning attacks described by Fang et al.\cite{fang2020poisoning}. Additionally, exploring reparametrization techniques such as the Low-Rank-adaptation method proposed by Liu et al.\cite{liu2025dplora} could provide insights into balancing efficiency and privacy in \ac{FL} systems. 
+	\paragraph{Trust Scores as a Regularization Mechanism.}
+	The gradual decay of the trust scores once the global model has been established suggests that they may capture increasing specialization of the local client models. Future work could therefore investigate whether these trust scores can be exploited as a regularization mechanism to reduce overfitting to individual client datasets.
 	
-	Other promising directions include testing alternative threat models (e.g., malicious servers, collusion between malicious clients and servers), or introducing data heterogeneity through artificially skewed dataset distributions. These extensions would better reflect real-world complexities and enable more robust comparisons across methodologies.
+	\paragraph{Broader Experimental Setup.}
+	Future work should extend the detailed analysis to CIFAR-10 and more challenging datasets that better reflect practical federated learning applications.
+	
+	Furthermore, the experimental setup should be expanded to encompass a broader range of aggregation methods, such as Krum, SMEA, and CAF, as well as stronger adversarial scenarios, including the model poisoning attacks proposed by Fang et al.~\cite{fang2020poisoning}. Exploring reparameterization techniques such as the Low-Rank Adaptation method proposed by Liu et al.~\cite{liu2025dplora} could further improve the understanding of the trade-offs between efficiency and privacy.
+	
+	Finally, future work should investigate alternative threat models, including malicious servers and collusion between malicious clients and the server, as well as non-\ac{IID} data distributions through artificially skewed client datasets. Together, these extensions would provide a more comprehensive understanding of the privacy--robustness--performance trilemma and help determine whether the interactions observed in this work generalize to more realistic federated learning settings.
+	
 	
 	% --------------------------------------------------
 	\section{Conclusion}
@@ -631,12 +620,6 @@
 	\onecolumn
 	\section{APPENDIX}
 	\FloatBarrier
-	\begin{figure}[h]
-		\centering
-		\includegraphics[width=0.7\linewidth]{img/bytes_per_client.png}
-		\caption{Bytes transferred per client per round for settings with different Top-k sparsification thresholds.}
-		\label{fig:bytes_per_round}
-	\end{figure}
 	\subsection{Experimental run on MNIST dataset with 50 rounds of full epochs trained, $n=50, \eta=40\%$, attack scale = 2.0}
 	\FloatBarrier
 	
@@ -705,7 +688,7 @@
 	
 	\begin{figure}
 		\includegraphics[width=\linewidth]{img/MNIST_07-12/duration_per_config.png}
-		\caption{The full training duration for varying numbers of clients.}
+		\caption{The average training duration per round for varying numbers of clients.}
 		\label{fig:duration_by_client_number}
 	\end{figure}
 \end{document}
