@@ -4,43 +4,52 @@
 
 % ----- FL fundamentals -----
 \newglossaryentry{globalmodel}{
-	name={Global model},
+	name={Sparsifi},
+	text={global model},
 	description={Shared model that is broadcast to every client, each round}
 }
 \newglossaryentry{localmodel}{
 	name={Local model},
+	text={local model},
 	description={Client's copy of the global model after training}
 }
 \newglossaryentry{communicationround}{
 	name={Communication round},
+	text={communication round},
 	description={One FL iteration}
 }
 \newglossaryentry{localsgdstep}{
 	name={Local (SGD) step},
+	text={local (SGD) step},
 	description={One batch gradient update during local training}
 }
 \newglossaryentry{localepoch}{
 	name={Local epoch},
+	text={local epoch},
 	description={One full pass over the clients local dataset during training}
 }
 
 % ----- Privacy -----
 \newglossaryentry{localdp}{
 	name={Local DP},
+	text={local DP},
 	description={Each client perturbs its own update with noise before transmission}
 }
 \newglossaryentry{centraldp}{
 	name={Central DP},
+	text={central DP},
 	description={A trusted aggregator adds noise once after collecting raw updates}
 }
 \newglossaryentry{privacybudget}{
 	name={Privacy budget},
+	text={privacy budget},
 	description={The acceptable privacy loss}
 }
 
 % ----- Robustness / Byzantine / FLTrust -----
 \newglossaryentry{byzantineadversary}{
 	name={Byzantine adversary},
+	plural={Byzantine adversaries},
 	description={A client that can deviate arbitrarily from the training protocol}
 }
 \newglossaryentry{byzantinefraction}{
@@ -49,42 +58,51 @@
 }
 \newglossaryentry{honestclient}{
 	name={Honest client},
+	text={honest client},
 	description={A client that follows the training protocol}
 }
 \newglossaryentry{maliciousclient}{
 	name={Malicious client},
-	description={A byzantine adversary that tries to corrupt the global model}
+	text={malicious client},
+	description={A Byzantine adversary that tries to corrupt the global model}
 }
 \newglossaryentry{trustscore}{
 	name={Trust score},
+	text={trust score},
 	description={FLTrust's per-client aggregation weight}
 }
 \newglossaryentry{rootdataset}{
 	name={Root dataset},
+	text={root dataset},
 	description={A class-balanced dataset held by the server to compute the trust scores}
 }
 \newglossaryentry{updateanchor}{
 	name={Update anchor},
+	text={update anchor},
 	description={A reference update, trained by the server to compute the trust scores}
 }
 \newglossaryentry{labelflippingattack}{
 	name={Label-flipping attack},
+	text={label-flipping attack},
 	description={A byzantine attack that swaps two labels during training}
 }
 \newglossaryentry{attackscale}{
 	name={Attack scale},
+	text={attack scale},
 	description={A multiplier applied to a malicious client's resulting update to amplify its effect on aggregation}
 }
 
 % ----- Efficiency -----
 \newglossaryentry{sparsificationratio}{
 	name={Sparsification ratio},
+	text={sparsification ratio},
 	description={The fraction of parameters retained by Top-k compression}
 }
 
 % ----- Trilemma metrics -----
 \newglossaryentry{accuracygap}{
 	name={Accuracy gap},
+	text={accuracy gap},
 	description={The drop in final accuracy an attacked configuration suffers, relative to a clean FedAvg baseline}
 }
 
