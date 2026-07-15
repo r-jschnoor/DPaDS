@@ -24,6 +24,11 @@
 \usepackage[table,xcdraw]{xcolor}
 \pgfplotsset{compat=1.18}
 \usepackage[printonlyused]{acronym}
+\usepackage[nonumberlist,nogroupskip]{glossaries}
+\makeglossaries
+\input{glossary.tex}
+\glsaddall
+\setlist[description]{itemsep=0.15em, parsep=0pt, topsep=0.3em}
 
 % --------------------------------------------------
 % Placeholder command
@@ -57,7 +62,7 @@
 		\acro{CAF}{Covariance bound-Agnostic Filter}
 	\end{acronym}
 	
-	\placeholder{glossary}
+	\printglossary
 	
 % --------------------------------------------------
 	\section{Introduction}
