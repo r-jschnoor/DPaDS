@@ -14,6 +14,9 @@
 - Write Setup section 5.5 in report (hardware and software stack)
 - Glossar
 - Link to Repo (Clone to clean repo with only code)
+- Do Präsi template
+
+- Eval read full report 
 
 
 
