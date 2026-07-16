@@ -3,13 +3,13 @@
 % Option handout        Ein PDF ohne Pausen und Overlayeffekte erzeugen.
 % Option aspectratio=43 169 => 16:9, 1610 => 16:10, 43 => 4:3
 \usepackage[utf8]{inputenc}
-\usepackage[ngerman]{babel}
+
 \usepackage{graphicx,xcolor}
 \usepackage[T1]{fontenc} % 8-Bit-Zeichen; ermöglicht korrektes Kopieren von Umlauten aus dem pdf 
 \bibliography{bib}
 \bibliographystyle{ieee}
-\usepackage{biblatex}
-\addbibresource{bib.bib}
+
+
 
 % SVS-Theme benutzen
 \usetheme{svs2021}
@@ -17,7 +17,7 @@
 % =============================
 % = Ab hier Inhalte ändern... 
 % =============================
-
+\begin{document}
 \title{Navigating the
 Privacy-Robustness-Performance-Trilemma
 in Federated Learning}
@@ -28,30 +28,12 @@ in Federated Learning}
 % \titlegraphic{\uhhlogo} % Logo für Titelseite, UHH-Logo ist Standard
 \eventlocation{Master Project Seminar Data Protection and Data Security, Hamburg, 18$^{th}$ of June 2026} % rechts oben auf Titelseite
 
-\begin{document}
+
 
 \begin{frame}
     \maketitle
 \end{frame}
 
-\begin{frame}
-    \frametitle{Agenda}
-    \tableofcontents
-\end{frame}
-
-\section{Motivation}
-\begin{frame}{Desirable Properties of Federated Learning}
-    \begin{table}[h]
-    \begin{tabular}{|>{\centering\arraybackslash}p{0.2\linewidth}|>{\centering\arraybackslash}p{0.35\linewidth}|>{\centering\arraybackslash}p{0.35\linewidth}|}\hline
-    \textbf{Property} & \textbf{Provides} & \textbf{Cost} \\ \hline
-        \textbf{Privacy} & Limited information leakage, protection of client data & Accuracy loss, slower convergence\\\hline
-        \textbf{Robustness} & Decreased vulnerability to Byzantine or poisoning attacks & Gradient distortion $\rightarrow$ Accuracy loss\\\hline
-        \textbf{Performance} & Increased model utility and efficiency& drawbacks in privacy or robustness
-    \\ \hline\end{tabular}
-\caption{Properties of FL Frameworks}
-\label{tab:properties}
-\end{table}
-\end{frame}
 
 
 \end{document}
