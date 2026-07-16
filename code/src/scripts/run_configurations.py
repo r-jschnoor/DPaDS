@@ -29,7 +29,13 @@ DEFAULT_GPU_INDEX = 0         # None -> auto-pick the GPU with most free VRAM.
 SHARED_PARAMS = dict(
     dataset = DEFAULT_DATASET,
     num_clients = 50,
-    num_rounds = 250,
+    num_rounds = 500,  # TEMPORARY: overridden from 250 to 500 to exactly match the
+                        # existing results/clean_base_run/ entries (verified against
+                        # their saved config blocks -- every other field here already
+                        # matches). Revert to 250 together with NUM_CLIENTS (below)
+                        # once the clients=50 clean baseline has been run (see
+                        # TODO.md item 3) -- both are shared by every other config's
+                        # sweep, including the currently-running attacked grid.
     num_byzantine = 20,   # byzantine_fraction = num_byzantine/num_clients = 0.4
     root_dataset_size = 2000,
     rescale_to_ref_norm = False,
@@ -97,7 +103,11 @@ BASE_CONFIGS = {
 EPSILON_VALUES = [1.0, 10.0]
 TOPK_VALUES = [0.01, 0.1]
 RL_VALUES = [10]
-NUM_CLIENTS = [80]
+NUM_CLIENTS = [50]  # TEMPORARY: set to just the missing clean_base_run client count (see
+                     # TODO.md item 3) so `--config 1 --no-attack` produces exactly that one
+                     # file. Change back to [80] (or whatever item 5's sweep needs) before/
+                     # after running this -- this constant is shared with the unrelated,
+                     # currently-running attacked clients=80 grid sweep.
 
 
 def expand_config(base: ExperimentConfig) -> list[ExperimentConfig]:

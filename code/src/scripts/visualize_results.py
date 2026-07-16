@@ -12,6 +12,17 @@ from openpyxl.styles import Alignment, Border, Font, Side
 from src.models import get_dataset_spec
 from src.mechanisms.topk import topk_sparsify, update_size_bytes
 
+# Canonical, shared location for the no-attack (num_byzantine=0) BASE-config
+# clean baseline runs used to compute delta accuracy (see
+# _zero_byzantine_base_accuracy_by_clients()). Anchored to this file's own
+# location so it resolves the same regardless of invoking cwd, mirroring
+# run_configurations.py's RESULTS_ROOT. One shared folder instead of a
+# per-results-folder "clean_base_run" copy, so a new client count only needs
+# to be added once.
+CLEAN_BASE_RUN_DIR = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "results", "clean_base_run"
+))
+
 
 def _io_path(path: str) -> str:
     """Return an absolute path suitable for filesystem I/O on this OS."""
@@ -63,8 +74,8 @@ def load_results_if_present(folder: str) -> list[dict]:
     Like load_results(), but returns [] instead of exiting when folder
     doesn't exist or contains no JSON result files.
 
-    Used for optional subfolders (e.g. clean_base_run/, see
-    export_excel_report()) that aren't present under every results folder.
+    Used for optional folders (e.g. CLEAN_BASE_RUN_DIR, see
+    export_excel_report()) that may not exist yet.
 
     Args:
         folder (str): path to folder containing result JSON files.
@@ -1010,12 +1021,10 @@ def export_excel_report(folder: str) -> None:
     The Summary sheet's "Delta accuracy" row needs a no-attack (num_byzantine=0)
     BASE run to compare against. Since folder's own JSON files are typically
     swept entirely under attack (see run_configurations.py's SHARED_PARAMS),
-    that baseline usually doesn't live among them -- it's read from
-    folder/clean_base_run/ instead (a subfolder holding a copy of a separate
-    no-attack run's result JSONs, see e.g. results/full-grid-run-combined/
-    clean_base_run/), if present. Falls back to folder's own results (covers
-    folders where the no-attack BASE run *is* one of the swept variants), and
-    to "N/A" for any client count found in neither place.
+    that baseline usually doesn't live among them -- it's read from the
+    shared CLEAN_BASE_RUN_DIR instead. Falls back to folder's own results
+    (covers folders where the no-attack BASE run *is* one of the swept
+    variants), and to "N/A" for any client count found in neither place.
 
     Args:
         folder (str): path to folder containing result JSON files.
@@ -1027,7 +1036,7 @@ def export_excel_report(folder: str) -> None:
     for result in results:
         groups[result["config"]["config_id"]].append(result)
 
-    clean_base_run_results = load_results_if_present(os.path.join(folder, "clean_base_run"))
+    clean_base_run_results = load_results_if_present(CLEAN_BASE_RUN_DIR)
     base_accuracy_by_clients = _zero_byzantine_base_accuracy_by_clients(results + clean_base_run_results)
 
     wb = Workbook()
@@ -1185,8 +1194,8 @@ def export_latex_table(folder: str) -> None:
     no row-window offset possible).
 
     kB/client: see _kb_per_client(). Delta accuracy needs a no-attack
-    (num_byzantine=0) BASE run to compare against -- read from
-    folder/clean_base_run/ if present, else folder's own results (see
+    (num_byzantine=0) BASE run to compare against -- read from the shared
+    CLEAN_BASE_RUN_DIR, else folder's own results (see
     _zero_byzantine_base_accuracy_by_clients()), "N/A" if neither has a
     matching client count. Bolding: only the BASE/DP/FLTrust blocks
     (config_id 1-3) get their best variant (lowest delta accuracy) bolded,
@@ -1196,7 +1205,7 @@ def export_latex_table(folder: str) -> None:
         folder (str): path to folder containing result JSON files.
     """
     results = load_results(folder)
-    clean_base_run_results = load_results_if_present(os.path.join(folder, "clean_base_run"))
+    clean_base_run_results = load_results_if_present(CLEAN_BASE_RUN_DIR)
     base_accuracy_by_clients = _zero_byzantine_base_accuracy_by_clients(results + clean_base_run_results)
 
     groups = defaultdict(list)
