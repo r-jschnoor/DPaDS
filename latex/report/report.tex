@@ -72,9 +72,7 @@
 	trilemma in \ac{FL}, examining how simultaneously deployed defenses
 	interact and compound across all three axes.
 	
-	\placeholder{%
-		Summarize results and contributions.%
-	}
+	Using a modular experimental pipeline built around \ac{DP-SGD}, FLTrust, and Top-$k$ sparsification, we assess these mechanisms individually and in combination on the MNIST dataset under label-flipping attacks. Our results show that the combination of \ac{DP-SGD} and FLTrust is not uniformly destructive, as hypothesized from the theoretical lower bound, but depends strongly on the local optimization schedule: full-epoch training causes \glspl{trustscore} to collapse early in training, whereas reducing the number of \glspl{localsgdstep} largely preserves model accuracy. We further observe a counterintuitive dependence of this interaction on the chosen \gls{privacybudget}, for which we do not provide a conclusive explanation. In contrast, Top-$k$ sparsification combines near-additively with FLTrust but super-additively with \ac{DP-SGD}. Finally, we track the temporal evolution of FLTrust \glspl{trustscore} throughout training, offering an empirical perspective on the behavioral divergence between honest and \glspl{maliciousclient} that has received limited attention in prior work. These findings refine the practical picture of the privacy--robustness--performance trilemma beyond what the existing theoretical bounds capture, while the limited scope of models, datasets, and mechanisms considered means the generality of these observations remains to be established.
 	
 	\subsection{Background and Motivation}
 	
