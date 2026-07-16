@@ -32,20 +32,31 @@ from pptx import Presentation
 from pptx.util import Emu, Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
-from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.shapes import MSO_SHAPE, MSO_CONNECTOR
 from pptx.enum.dml import MSO_LINE_DASH_STYLE
 
-ACCENT = RGBColor(0x24, 0x5C, 0x9E)
-PILL_BG = RGBColor(0xEA, 0xF1, 0xFB)
+# Palette/font below are lifted from DPaDS_final.pptx's theme ("SVSTemplate2023",
+# the Uni Hamburg template) rather than eyeballed, so this deck reads as the same
+# deliverable family as the final presentation. Geometry/positions elsewhere in this
+# file are untouched -- only these constants, add_divider_line(), and add_logo() (both
+# new, additive shapes) changed; see README.md for what "design-only" means here.
+ACCENT = RGBColor(0x32, 0x57, 0x86)        # DPaDS_final theme dk2/tx2 -- was 0x245C9E
+BULLET_RED = RGBColor(0xC1, 0x21, 0x2A)    # DPaDS_final theme accent2 -- bullet markers there are red
+PILL_BG = RGBColor(0xC9, 0xE1, 0xFF)       # DPaDS_final theme accent5 -- was 0xEAF1FB
 BODY_GREY = RGBColor(0x4B, 0x55, 0x63)
 MUTED_GREY = RGBColor(0x9C, 0xA3, 0xAF)
 INK = RGBColor(0x1F, 0x20, 0x23)
+TITLE_GREY = RGBColor(0x80, 0x80, 0x80)    # DPaDS_final titleStyle: tx1 (black), lumMod/lumOff 50%/50%
 SUBTITLE_GREY = RGBColor(0x6B, 0x72, 0x80)
 TRACK_GREY = RGBColor(0xE2, 0xE2, 0xE2)
 DOT_INACTIVE = RGBColor(0xD1, 0xD5, 0xDB)
 PLACEHOLDER_BG = RGBColor(0xED, 0xEE, 0xF0)
 PLACEHOLDER_BORDER = RGBColor(0xE5, 0xE7, 0xEB)
-FONT = "Arial"
+DIVIDER_GREY = RGBColor(0xB3, 0xB3, 0xB3)  # DPaDS_final's title-underline divider color
+FONT = "Calibri"                           # DPaDS_final theme major/minor font -- was "Arial"
+
+LOGO_PATH = Path(__file__).parent / "assets" / "uhh_logo.png"  # extracted from DPaDS_final.pptx (image1.png)
+LOGO_ASPECT = 268 / 111  # native px size of the extracted logo
 
 MC_NS = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
@@ -118,6 +129,18 @@ TRACK_X, TRACK_Y, TRACK_W, TRACK_H = 1905000, 5695838, 14478000, 37951  # 200px,
 DOT_ANCHOR_Y_PX = 600
 LABEL_Y = 6019726    # 632px
 LEFT_MARGIN_PX, RIGHT_MARGIN_PX = 200, 1720
+
+# New, additive design elements (see top-of-file comment) -- not part of the original
+# Timeline_Component_Deck.pptx layout baseline above.
+DIVIDER_X_LEFT = 1143000               # matches TITLE/SUBTITLE left edge
+DIVIDER_X_RIGHT = CANVAS_W - 1143000   # symmetric right margin
+DIVIDER_Y = 1905000                    # 200px -- modest gap below the subtitle block
+
+LOGO_W = 2857500   # 300px
+LOGO_H = round(LOGO_W / LOGO_ASPECT)
+LOGO_X = CANVAS_W - LOGO_W - 952500   # 100px right margin -- top-right, clear of the
+                                        # left-aligned title/subtitle/author text
+LOGO_Y = 571500     # 60px top margin
 
 prs = Presentation()
 prs.slide_width = CANVAS_W
@@ -214,12 +237,12 @@ def add_bullets(slide, left, top, width, bullets, size, name):
         r1.font.size = Pt(size)
         r1.font.bold = True
         r1.font.name = FONT
-        r1.font.color.rgb = ACCENT
+        r1.font.color.rgb = BULLET_RED   # DPaDS_final bodyStyle lvl1: red (accent2) bullet marker
         r2 = p.add_run()
         r2.text = b
         r2.font.size = Pt(size)
         r2.font.name = FONT
-        r2.font.color.rgb = BODY_GREY
+        r2.font.color.rgb = ACCENT       # DPaDS_final bodyStyle lvl1: blue (tx2) body text
     return box
 
 
@@ -245,6 +268,38 @@ def add_image_placeholder(slide, left, top, label, name):
     r.font.name = "Consolas"
     r.font.color.rgb = MUTED_GREY
     return shp
+
+
+def add_divider_line(slide, name):
+    """
+    Thin grey line under the deck title/subtitle, mirroring DPaDS_final's
+    title-underline divider (slideMaster1.xml's "Gerade Verbindung 14").
+
+    Identical position/size/color on every slide, so it's harmless even if Morph
+    auto-matches it across the milestone slides (interpolating between two
+    identical states is a no-op) -- deliberately NOT given a `!!` name, since it
+    isn't one of the timeline's own animated elements (see README.md).
+    """
+    line = slide.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, Emu(DIVIDER_X_LEFT), Emu(DIVIDER_Y),
+                                       Emu(DIVIDER_X_RIGHT), Emu(DIVIDER_Y))
+    line.name = name
+    line.line.color.rgb = DIVIDER_GREY
+    line.line.width = Pt(1.5)
+    line.shadow.inherit = False
+    return line
+
+
+def add_logo(slide, name):
+    """
+    Uni Hamburg logo, matching DPaDS_final's title-slide branding (extracted from
+    its slideLayout1.xml as assets/uhh_logo.png). DPaDS_final places it top-left;
+    placed top-right here instead so it doesn't collide with this deck's own
+    title/subtitle/author text, which all start at the left margin. Title slide
+    only, matching DPaDS_final's own pattern (its content-slide layout has no logo).
+    """
+    pic = slide.shapes.add_picture(str(LOGO_PATH), Emu(LOGO_X), Emu(LOGO_Y), Emu(LOGO_W), Emu(LOGO_H))
+    pic.name = name
+    return pic
 
 
 def dot_geometry(j, active_idx):
@@ -292,18 +347,21 @@ def add_timeline(slide, active_idx):
 
 # --- Title slide ---
 title_slide = prs.slides.add_slide(BLANK)
-add_text(title_slide, TITLE["x"], TITLE["y"], TITLE["w"], TITLE["h"], "FL-Trilemma: Project Timeline", 42, INK, bold=True)
+add_text(title_slide, TITLE["x"], TITLE["y"], TITLE["w"], TITLE["h"], "FL-Trilemma: Project Timeline", 42, TITLE_GREY, bold=True)
 add_text(title_slide, SUBTITLE["x"], SUBTITLE["y"], SUBTITLE["w"], SUBTITLE["h"], "From kick-off to final presentation", 21, SUBTITLE_GREY)
 add_text(title_slide, TEXT_X, 3000000, 16764000, 400000, "Jonas Müller  ·  Rebekka Schnoor", 18, BODY_GREY)
+add_divider_line(title_slide, name="divider_title")
+add_logo(title_slide, name="logo_title")
 add_fade_transition(title_slide)
 
 # --- Milestone slides ---
 for idx, m in enumerate(MILESTONES):
     slide = prs.slides.add_slide(BLANK)
-    add_text(slide, TITLE["x"], TITLE["y"], TITLE["w"], TITLE["h"], "FL-Trilemma: Project Timeline", 42, INK, bold=True,
+    add_text(slide, TITLE["x"], TITLE["y"], TITLE["w"], TITLE["h"], "FL-Trilemma: Project Timeline", 42, TITLE_GREY, bold=True,
               name=f"title_m{idx}")
     add_text(slide, SUBTITLE["x"], SUBTITLE["y"], SUBTITLE["w"], SUBTITLE["h"], "From kick-off to final presentation", 21, SUBTITLE_GREY,
               name=f"subtitle_m{idx}")
+    add_divider_line(slide, name=f"divider_m{idx}")
 
     anchor_y = TOP_ANCHOR_Y if idx % 2 == 0 else BOTTOM_ANCHOR_Y
 
@@ -324,6 +382,6 @@ for idx, m in enumerate(MILESTONES):
     add_timeline(slide, idx)
     add_morph_transition(slide)
 
-out_path = Path(__file__).parent / "timeline.pptx"
+out_path = Path(__file__).parent / "timeline_base.pptx"
 prs.save(out_path)
 print("saved", out_path)

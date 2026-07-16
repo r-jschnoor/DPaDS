@@ -1,6 +1,6 @@
 # Timeline deck
 
-`timeline.pptx` is a PowerPoint rebuild of the claude.ai Design "Timeline Component"
+`timeline_base.pptx` is a PowerPoint rebuild of the claude.ai Design "Timeline Component"
 (`Timeline Component.dc.html`, project `# Animated Timeline Component`), which shows the
 9 `latex/tmp/timeline.md` milestones as an interactive, click-through card carousel with a
 CSS-animated progress bar. PowerPoint can't run that component directly, so this deck
@@ -16,7 +16,17 @@ dependency, install into `.venvD` or a separate venv):
 .venvD/bin/python latex/final_presentation/build_timeline_pptx.py
 ```
 
-It writes `timeline.pptx` next to itself.
+It writes `timeline_base.pptx` next to itself.
+
+## Design
+
+Colors and the font family are lifted from `DPaDS_final.pptx`'s theme ("SVSTemplate2023",
+the Uni Hamburg template) -- accent blue `#325786`, bullet-marker red `#C1212A`, pill
+background `#C9E1FF`, divider-line grey `#B3B3B3`, and Calibri throughout, plus the Uni
+Hamburg logo (`assets/uhh_logo.png`, extracted from that file's `slideLayout1.xml`) on the
+title slide. None of this touches the timeline's own geometry, content, or the scoped-Morph
+transition below -- see `build_timeline_pptx.py`'s top-of-file comment for exactly which
+constants/shapes changed.
 
 ## Layout
 
