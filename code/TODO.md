@@ -42,6 +42,7 @@ Parameters to test in a series run: ds(mnist), Eps(1,(5),10), topk(0.01,0.1,(0.5
 -----
 
 ### What to do next
+1. Provide large legend font for split up radar charts per config split by client count
 2. Update Präsi to use template
 3. Duplicate repo for linking. Then create and update READMEs for duplicated repo to actually be helpful READMEs
 

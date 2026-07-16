@@ -1636,7 +1636,7 @@ def _render_radar_per_config_figure(results, output_path, title, max_epsilon, nu
         ax.set_yticks([0.25, 0.5, 0.75, 1.0])
         ax.set_yticklabels(["0.25", "0.50", "0.75", "1.00"], fontsize=5)
         ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=5, loc="upper center",
+        ax.legend(fontsize=10, loc="upper center",
                   bbox_to_anchor=(0.5, -0.12),
                   ncol=1, framealpha=0.8)
 
