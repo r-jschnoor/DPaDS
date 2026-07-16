@@ -3,7 +3,6 @@
 - Refactor redundancy
 
 
-- Write Setup section 5.5 in report (hardware and software stack)
 - Link to Repo (Clone to clean repo with only code)
 - Do Präsi template
 
@@ -43,11 +42,11 @@ Parameters to test in a series run: ds(mnist), Eps(1,(5),10), topk(0.01,0.1,(0.5
 -----
 
 ### What to do next
-1. Write section 5.5
 2. Update Präsi to use template
+3. Duplicate repo for linking. Then create and update READMEs for duplicated repo to actually be helpful READMEs
 
 
-### How to get to computation ressources
+### How to get to computation resources
 1. `ssh sppc25`
 2. type password twice
 3. `cd /data/8schnoor/DPaDS/code/src/`
@@ -58,4 +57,4 @@ Parameters to test in a series run: ds(mnist), Eps(1,(5),10), topk(0.01,0.1,(0.5
 
 
 ## Notes on the Report
-- 
+- After paragraph there shouldnt be a dot (e.g. "MNIST." -> "MNIST")
