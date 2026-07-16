@@ -265,7 +265,7 @@
 	
 	\subsection{Trilemma Visualization}
 	
-	For a compact depiction of the trade-offs, we adapt the visualization introduced by Alouah et al. and augment it with concrete heuristics for each axis. Figure~\ref{fig:radar_ex} illustrates the proposed visualization, while the complete results are presented in Figures~\ref{}.
+	For a compact depiction of the trade-offs, we adapt the visualization introduced by Alouah et al. and augment it with concrete heuristics for each axis. Figure~\ref{fig:radar_ex} illustrates the proposed visualization, while the complete results are presented in Figures~\ref{fig:radar_exp1}, \ref{fig:radar_exp2} and \ref{fig:radar_exp3}.
 	
 	\begin{figure}[h]
 		\centering
@@ -423,7 +423,7 @@
 	\section{Results}
 	\label{sec:results}
 	% --------------------------------------------------
-	This section summarizes the experimental results. The final round accuracy over all configurations is reported in Figure~\ref{fig:bars_acc_exp1}.
+	This section summarizes the experimental results. The trade-offs achieved on all three experimental setups are visualized in the Sections \ref{sec:run1}, \ref{sec:run2} and \ref{sec:run3}.
 	\subsection{Baseline Reproduction (RQ1 -- Sanity Check)}
 	
 	Training a clean \gls{fedavg} model using only \glspl{honestclient} on the MNIST dataset yielded a final accuracy of 98\%, slightly below the 99\% reported in the original \gls{fedavg} paper~\cite{mcmahan2017fedavg}.
@@ -448,7 +448,7 @@
 	The replacement of pure \ac{SGD} with \ac{DP-SGD} on the clients results in an increase in training time. This effect is stronger for stricter \glspl{privacybudget} as depicted in Figure~\ref{fig:duration_by_client_number}.
 	
 	\paragraph{Final accuracy.}
-	Regarding the model performance, all conducted experiments report an accuracy loss of $\approx 0.2$ compared to the baseline (see Figures~\ref{fig:bars_acc_exp1} and~\ref{fig:bars_accexp2}).
+	Regarding the model performance, all conducted experiments report an accuracy loss of $\approx 0.2$ compared to the baseline (see Figures~\ref{fig:bars_acc_exp1},~\ref{fig:bars_accexp2} and"\ref{fig:bars_accexp3}).
 	Contrary to our expectations, the assigned \gls{privacybudget} does not have a major influence on the accuracy besides the general degradation observed when applying \ac{DP-SGD}: We achieve similar performance for all $\varepsilon \in [1;5;10;25]$. Figure~\ref{fig:DP_acc} shows a slight variation in the early rounds but overall a similar evolution for all values of $\varepsilon$.
 	
 	\subsubsection{FLTrust}
@@ -456,7 +456,7 @@
 	\paragraph{Effect.}
 	Enabling FLTrust improves model accuracy and mitigates the effects of the \gls{labelflippingattack}, as shown in Figures~\ref{fig:confusion_matrix_base} and~\ref{fig:confusion_matrix_fltrust}. In the baseline model, the targeted digits 3 and 7 are consistently misclassified as each other, whereas enabling FLTrust largely restores correct predictions. The improvement becomes more pronounced with increasing \glspl{byzantinefraction} and \glspl{attackscale}. The results shown were obtained with a \gls{byzantinefraction} of $\eta = 0.4$ and an \gls{attackscale} of 2.0.
 	
-	A lower \gls{byzantinefraction} results in a better performance of the unprotected settings and therefore lowers the observable effect of FLTrust.
+	A lower \gls{byzantinefraction} results in a better performance of the unprotected settings and therefore lowers the observable effect of FLTrust. The exact results are available in Section~\ref{sec:run2}.
 	
 	\paragraph{Cost.}
 	The replacement of \gls{fedavg} aggregation with FLTrust did not yield a noticeable impact on the wall clock training time (compare Figure~\ref{fig:duration_by_client_number}).
@@ -485,11 +485,11 @@
 	\subsubsection{\ac{DP} + Robustness}
 	
 	\paragraph{Cost.}
-	Combining \ac{DP-SGD} with FLTrust results in a substantial decline in model accuracy when training full epochs per round, reducing performance to only slightly above random guessing. Figure~\ref{fig:confusion_DP+FLTRUST} shows the confusion matrix of the final model, revealing that it predicts only two classes.
+	Combining \ac{DP-SGD} with FLTrust results in a substantial decline in model accuracy when training full epochs per round (results available in Section~\ref{sec:run1}), reducing performance to only slightly above random guessing. Figure~\ref{fig:confusion_DP+FLTRUST} shows the confusion matrix of the final model, revealing that it predicts only two classes.
 	
 	These results are consistent with the super-additive interaction between privacy and Byzantine robustness derived by Allouah et al. Intuitively, the noise introduced for differential privacy causes client updates to deviate from the anchor update computed on the \gls{rootdataset}, resulting in uniformly low \glspl{trustscore}. This behavior is reflected in the second chart of Figure~\ref{fig:trustscores_over_rounds}.
 	
-	When reducing the local training steps to 10 batches per round (final accuracies available in Figure~\ref{fig:bars_accexp2}), the decline is surprisingly soft, surpassing the results of \ac{DP} alone and showcasing the same \gls{accuracygap} against the FLTrust-only results as the \ac{DP}-only config did against the base configuration
+	When reducing the local training steps to 10 batches per round (results available in Section~\ref{sec:run2}), the decline is surprisingly soft, surpassing the results of \ac{DP} alone and showcasing the same \gls{accuracygap} against the FLTrust-only results as the \ac{DP}-only config did against the base configuration
 	Contrary to our expectations, for the combination of FLTrust and \ac{DP}, stricter privacy guarantees ($\varepsilon=1$) led to even better accuracy than more relaxed ones ($\varepsilon=10$), resulting in \glspl{accuracygap} down to $\Delta_{acc}=0.05$ compared to the honest \gls{fedavg} setting.
 	
 	\paragraph{Influence of the $\varepsilon$ value.}
@@ -652,6 +652,7 @@
 	\end{figure}
 	\FloatBarrier
 	\subsection*{Experimental run on MNIST dataset with 50 rounds of full epochs trained, $n=50, \eta=0.4$, \gls{attackscale} = 2.0}
+	\label{sec:run1}
 	\FloatBarrier
 	
 	\begin{figure}[h!]
@@ -679,6 +680,12 @@
 	\end{figure}
 	
 	\begin{figure}
+		\includegraphics[width=\textwidth]{img/MNIST_07-10/radar_per_config.png}
+		\caption{Radar chart summarizing the results along all axes.}
+		\label{fig:radar_exp1}
+	\end{figure}
+	
+	\begin{figure}
 		\includegraphics[width=\textwidth]{img/MNIST_07-10/bar_accuracy_bars.png}
 		\includegraphics[width=\textwidth]{img/MNIST_07-10/bar_accuracy_legend.png}
 		\caption{Final accuracy achieved on all different configurations.}
@@ -689,9 +696,6 @@
 		\includegraphics[width=\textwidth]{img/MNIST_07-10/per_config_line_charts/line_chart_config_2.png}
 		\caption{Accuracy over training rounds for DP-only configuration.}
 		\label{fig:DP_acc}
-	\end{figure}
-	
-	\begin{figure}
 		\includegraphics[width=\textwidth]{img/MNIST_07-10/per_config_line_charts/line_chart_config_5.png}
 		\caption{Accuracy per training round for DP+FLTrust configuration.}
 		\label{fig:DP+FLTRUST_acc}
@@ -769,6 +773,15 @@
 
 	\clearpage
 	\subsection*{Experimental run on MNIST dataset with 500 rounds of 10 \glspl{localsgdstep} each, $n\in\{10,30,60\}, \eta=0.2$, \gls{attackscale} = 2.0}
+	\label{sec:run2}
+	
+	\begin{figure}
+		\includegraphics[width=\textwidth]{img/MNIST_07-12/radar_per_config_clients-10.png}
+		\includegraphics[width=\textwidth]{img/MNIST_07-12/radar_per_config_clients-30.png}
+		\includegraphics[width=\textwidth]{img/MNIST_07-12/radar_per_config_clients-60.png}
+		\caption{Radar chart summarizing the results along all axes for 10 (top), 30 (middle) and 60 (bottom) clients.}
+		\label{fig:radar_exp2}
+	\end{figure}
 	
 	\begin{figure}[h]
 		\centering
@@ -878,7 +891,15 @@
 \end{longtable}
 \clearpage
 \subsection*{Experimental run on MNIST dataset with 500 rounds of 10 \glspl{localsgdstep} each, $n\in\{10,30,60\}, \eta=0.4$, \gls{attackscale} = 2.0}
-
+\label{sec:run3}
+	
+	\begin{figure}
+		\includegraphics[width=\textwidth]{img/MNIST_07-12/radar_per_config_clients-10.png}
+		\includegraphics[width=\textwidth]{img/MNIST_07-12/radar_per_config_clients-30.png}
+		\includegraphics[width=\textwidth]{img/MNIST_07-12/radar_per_config_clients-60.png}
+		\caption{Radar chart summarizing the results along all axes for 10 (top), 30 (middle) and 60 (bottom) clients.}
+		\label{fig:radar_exp3}
+	\end{figure}
 	\begin{figure}[h]
 	\centering
 	\includegraphics[width=\textwidth]{img/MNIST_07-14/bar_accuracy.png}
