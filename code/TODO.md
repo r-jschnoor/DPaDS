@@ -7,7 +7,6 @@
 
 - Eval read full report
 
-- Präsi timeline add 15.7. Cifar10 run finished (at the end of the präsi?)
 - Präsi timeline add future work knob
 
 
