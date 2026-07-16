@@ -3,7 +3,6 @@
 - Refactor redundancy
 
 
-- Link to Repo (Clone to clean repo with only code)
 - Do Präsi template
 
 - Eval read full report
@@ -42,7 +41,6 @@ Parameters to test in a series run: ds(mnist), Eps(1,(5),10), topk(0.01,0.1,(0.5
 -----
 
 ### What to do next
-1. Provide large legend font for split up radar charts per config split by client count
 2. Update Präsi to use template
 3. Duplicate repo for linking. Then create and update READMEs for duplicated repo to actually be helpful READMEs
 
@@ -55,6 +53,15 @@ Parameters to test in a series run: ds(mnist), Eps(1,(5),10), topk(0.01,0.1,(0.5
 5. If there is a current session: `tmux attach -t <sess_name>`
 6. To start a session: `tmux new -s <sess_name>`
 
+
+## Präsi
+- Goal: integrate the final_presentation/timeline_base.pptx into the DPaDS_final.pptx. It should be between the current slide 1 and 2
+- All existing transitions (especially the scoped morph!) from the timeline_base should be preserved and taken over to the DPaDS_final presentation
+- The design of the DPaDS presentation should be applied to the timeline_base. This includes:
+    - Title size, font, color, positioning, etc.
+    - No subtitle in the slide title
+    - Overall items on the slide except for anything that directly relates to the timeline and its descriptions (just change the font color and style here to match the DPaDS_final presentation)
+- Verify: Double check that everything is still at the correct place and the transitions still hold. Rigouosely run a sanity check at the end and fix potential problems.
 
 
 ## Notes on the Report
