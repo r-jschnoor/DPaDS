@@ -2,12 +2,6 @@
 
 - Refactor redundancy
 
-- Analyze the three axes of the trilemma triangle and propose improvements to the calculation of each metric (robusness, privacy, efficiency). Then Trilemma Triangle chart update how edges are computed (see README.md)
-    - Privacy: max(0, (eps_max - eps_x)/eps_max)
-    - Robustness: max(1, 1 - delta_accuracy) (delta_accuracy = clean_accuracy - actual_accuracy_x)
-    - Efficiency: (set alpha 0.5, t = runtime of config, bytes = bytes per client per round, base = no attack config 1, x = current run results) -> alpha * t_base/t_x + (1-alpha)*((bytes_base-bytes_x)/bytes_base)
-
-
 
 - Write Setup section 5.5 in report (hardware and software stack)
 - Link to Repo (Clone to clean repo with only code)
@@ -17,9 +11,6 @@
 
 - Präsi timeline add 15.7. Cifar10 run finished (at the end of the präsi?)
 - Präsi timeline add future work knob
-
-- Update first table in appendix. Delta accuracy missing. Folder: 20260710_022959
-
 
 
 -----
@@ -52,10 +43,8 @@ Parameters to test in a series run: ds(mnist), Eps(1,(5),10), topk(0.01,0.1,(0.5
 -----
 
 ### What to do next
-1. Update Triangle axe value calculation according to above (in general todos). Also compare it to the formulas described in the section 3.3 Trilemma Visualization in the Report.
-2. On bar chart there is no info on number of clients per config so e.g. config one has same params (written on plot) for all bars!! The legend should include the number of clients for each entry if there were multiple different client counts tested. Further, the description at the bottom should also only includes a static client and byzantine count. This should be updated to show something like e.g. 10/30/50, depending on the used client count configs. Similar to the byzantine clients.
-3. The latex table generation script in visualize config does not fill in the delta accuracy (see folder 20260710_022959). Check if this is a bug or if the data is missing.
-
+1. Write section 5.5
+2. Update Präsi to use template
 
 
 ### How to get to computation ressources

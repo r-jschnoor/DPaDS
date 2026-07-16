@@ -100,20 +100,27 @@ def load_results_if_present(folder: str) -> list[dict]:
     return results
 
 
-def make_label(filename: str) -> str:
+def make_label(filename: str, show_clients: bool = False) -> str:
     """
     Generate a short human-readable label from a result filename.
 
     Extracts dp, fltrust, topk fields from the filename.
 
     Args:
-        filename (str): result JSON filename.
+        filename (str):      result JSON filename.
+        show_clients (bool): also include "clients-N" in the label. Set True
+                             when the results sharing this label's legend/axis
+                             (see results_have_multiple_client_counts()) mix
+                             more than one client count -- otherwise two
+                             variants that only differ by client count would
+                             render with the exact same, indistinguishable
+                             label (e.g. two "BASE" entries).
 
     Returns:
         str: short label e.g. 'dp-False_fltrust-True_topk-False'
     """
     parts  = filename.replace(".json", "").split("_")
-    keep   = ["dp", "fltrust", "topk"]
+    keep   = ["dp", "fltrust", "topk"] + (["clients"] if show_clients else [])
     labels = []
     i = 0
     while i < len(parts):
@@ -160,6 +167,43 @@ def replace_config_with_label(config_part: str) -> str:
         "8": "ALL"
     }
     return config_labels.get(config_id, f"Config-{config_id}")
+
+
+def results_have_multiple_client_counts(results: list[dict]) -> bool:
+    """
+    True if results span more than one distinct num_clients value.
+
+    Used to decide, per legend/axis group, whether make_label()'s labels need
+    show_clients=True to stay distinguishable -- most folders sweep a single
+    client count and don't need the extra clutter, but folders/groups mixing
+    several (e.g. NUM_CLIENTS sweeps in run_configurations.py) do.
+
+    Args:
+        results (list[dict]): loaded result JSONs (see load_results()).
+
+    Returns:
+        bool: True if more than one distinct num_clients value is present.
+    """
+    return len({r["config"]["num_clients"] for r in results}) > 1
+
+
+def _format_distinct_values(values) -> str:
+    """
+    Format a run parameter (e.g. num_clients, num_byzantine) for a caption --
+    a single number if every result shares the same value, else every
+    distinct value found, sorted and slash-joined (e.g. "10/30/50"), so a
+    caption never silently claims one static value for a folder that
+    actually mixes several (see visualize_bar_chart_per_config()'s params_text).
+
+    Args:
+        values: iterable of the parameter's value across results.
+
+    Returns:
+        str: the single value, or slash-joined distinct values.
+    """
+    distinct = sorted(set(values))
+    return "/".join(str(v) for v in distinct)
+
 
 def variant_sort_key(result: dict) -> tuple:
     """
@@ -217,6 +261,7 @@ def visualize_overview(folder: str) -> None:
         folder (str): path to folder containing result JSON files.
     """
     results = load_results(folder)
+    show_clients = results_have_multiple_client_counts(results)
     metrics = ["loss", "accuracy", "epsilon"]
     titles  = {
         "loss":     "Loss per Round",
@@ -238,7 +283,7 @@ def visualize_overview(folder: str) -> None:
             rounds, values = extract_metric(result, metric)
             if not values:
                 continue
-            label = make_label(result["_filename"])
+            label = make_label(result["_filename"], show_clients=show_clients)
             ax.plot(rounds, values, label=label)
             any_plotted = True
 
@@ -290,6 +335,7 @@ def visualize_lines_per_config(folder: str) -> None:
     os.makedirs(os.path.join(folder, subfolder_name), exist_ok=True)
 
     for config_id, group_results in sorted(config_groups.items()):
+        show_clients = results_have_multiple_client_counts(group_results)
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
         fig.suptitle(replace_config_with_label(str(config_id)) + " - Per Round Metrics", fontsize=13)
 
@@ -303,7 +349,7 @@ def visualize_lines_per_config(folder: str) -> None:
                 rounds, values = extract_metric(result, metric)
                 if not values:
                     continue
-                label = make_label(result["_filename"])
+                label = make_label(result["_filename"], show_clients=show_clients)
                 ax.plot(rounds, values, label=label)
 
             # Make sure empty plots dont throw warnings if there is nothing to plot
@@ -351,6 +397,7 @@ def visualize_bar_chart_per_config(folder: str) -> None:
     config_ids = sorted(groups.keys())
     group_bars = []             # [(label, accuracy)] per group
     for config_id in config_ids:
+        show_clients = results_have_multiple_client_counts(groups[config_id])
         bars = []
         for result in sorted(groups[config_id], key=variant_sort_key):
             # Take only final rounds accuracy
@@ -358,7 +405,7 @@ def visualize_bar_chart_per_config(folder: str) -> None:
             if final_accuracy is None:
                 print(f"Could not find accuracy of final round for one of configs {config_id} results. ({result['_filename']})")
                 continue
-            label = make_label(result["_filename"])
+            label = make_label(result["_filename"], show_clients=show_clients)
             bars.append((label, final_accuracy))
         group_bars.append((config_id, bars))
 
@@ -441,9 +488,11 @@ def visualize_bar_chart_per_config(folder: str) -> None:
     attack_text = f"Attack: {attack_type}"
     if attack_scale is not None and attack_scale != 1.0:
         attack_text += f" (scale x{attack_scale})"
+    clients_text = _format_distinct_values(r["config"]["num_clients"] for r in results)
+    byzantine_text = _format_distinct_values(r["config"]["num_byzantine"] for r in results)
     params_text = (
-        f"Clients: {run_config['num_clients']}  |  "
-        f"Byzantine: {run_config['num_byzantine']}  |  "
+        f"Clients: {clients_text}  |  "
+        f"Byzantine: {byzantine_text}  |  "
         f"Rounds: {run_config['num_rounds']}  |  "
         f"Root Dataset Size: {run_config['root_dataset_size']}  |  "
         f"{attack_text}"
@@ -1136,6 +1185,42 @@ def _kb_per_client(result: dict, num_params: int) -> float:
     return avg_bytes / 1000
 
 
+def _efficiency_base_by_clients(results: list[dict], num_params: int) -> dict[int, tuple[float, float]]:
+    """
+    Map num_clients -> (avg_seconds_per_round, KB_per_client_per_round) of the
+    config-1 (BASE) variant at that client count, within the same results
+    folder.
+
+    This is the Efficiency axis's "baseline configuration" reference point
+    (report.tex sec 3.3: t_base/b_base) -- the folder's own plain-FedAvg
+    variant at a matching client count, not the separate no-attack clean
+    baseline used for the Robustness axis (see
+    _zero_byzantine_base_accuracy_by_clients()). Config 1 is normally swept
+    under the same attack as every other config in a folder (SHARED_PARAMS),
+    so this deliberately keeps whatever num_byzantine that config-1 variant
+    has -- Efficiency measures resource cost, not attack resilience.
+
+    Args:
+        results (list[dict]): loaded result JSONs (see load_results()).
+        num_params (int):     this folder's model's total parameter count
+                              (see get_dataset_spec()), for _kb_per_client()'s
+                              fallback when update_bytes wasn't recorded.
+
+    Returns:
+        dict[int, tuple[float, float]]: num_clients -> (t_base, b_base).
+    """
+    base_by_clients = {}
+    for result in results:
+        config = result["config"]
+        if config["config_id"] != 1:
+            continue
+        t_base = _avg_seconds_per_round(result)
+        if t_base is None:
+            continue
+        base_by_clients[config["num_clients"]] = (t_base, _kb_per_client(result, num_params))
+    return base_by_clients
+
+
 def _latex_table_caption(results: list[dict]) -> str:
     """
     Build the table's caption, noting Rl/Byzantine-fraction/rounds only when
@@ -1325,13 +1410,86 @@ def get_base_accuracy_and_max_epsilon(results):
 
     return base_accuracy, max_epsilon
 
+PRIVACY_KEY = "privacy_score"
+ROBUSTNESS_KEY = "robustness_score"
+EFFICIENCY_KEY = "efficiency_score"
+
+
+def _compute_trilemma_scores(result, max_epsilon, num_params,
+                             clean_base_accuracy_by_clients, efficiency_base_by_clients):
+    """
+    Compute the three trilemma axis scores for one result, each clamped to [0,1]
+    (report.tex sec 3.3) -- a value outside that range would either mean the
+    attack improved accuracy (Robustness) or this config is more than 2x cheaper/
+    more expensive than the baseline (Efficiency), neither of which the radar's
+    fixed-scale axes can represent meaningfully.
+
+    Args:
+        result (dict):              loaded result JSON.
+        max_epsilon (float):        folder-wide max epsilon (see
+                                    get_base_accuracy_and_max_epsilon()), for
+                                    normalizing Privacy.
+        num_params (int):           this folder's model's total parameter count
+                                    (see get_dataset_spec()), for the Efficiency
+                                    axis's bytes-per-client fallback.
+        clean_base_accuracy_by_clients (dict[int, float]): num_clients -> no-attack
+            BASE final accuracy (see _zero_byzantine_base_accuracy_by_clients()),
+            the Robustness axis's reference point.
+        efficiency_base_by_clients (dict[int, tuple[float, float]]): num_clients ->
+            (t_base, b_base) (see _efficiency_base_by_clients()), the Efficiency
+            axis's reference point.
+
+    Returns:
+        dict: {PRIVACY_KEY: float, ROBUSTNESS_KEY: float, EFFICIENCY_KEY: float}.
+    """
+    config = result["config"]
+    num_clients = config["num_clients"]
+    final_accuracy = result["results"]["per_round"][-1].get("accuracy")
+
+    # Privacy: max(0, (eps_max - eps) / eps_max), 0 when DP is off.
+    if not config["use_dp"] or max_epsilon <= 0:
+        privacy = 0.0
+    else:
+        privacy = max(1 - (config["epsilon"] / max_epsilon), 0)  # The max is due to currently possible negative epsilon values
+
+    # Robustness: 1 - delta_accuracy, delta_accuracy = clean_accuracy - final_accuracy.
+    # clean_accuracy is the no-attack BASE run's accuracy at the same client count
+    # (results/clean_base_run/, see CLEAN_BASE_RUN_DIR) -- falls back to raw
+    # final_accuracy (the old behavior) with a warning if that baseline is missing
+    # for this client count, rather than silently guessing.
+    clean_accuracy = clean_base_accuracy_by_clients.get(num_clients)
+    if clean_accuracy is not None and final_accuracy is not None:
+        delta_accuracy = clean_accuracy - final_accuracy
+        robustness = min(1.0, max(0.0, 1 - delta_accuracy))
+    else:
+        print(f"Warning: no clean (no-attack) BASE accuracy for num_clients={num_clients} "
+              f"-- Robustness falls back to raw final_accuracy for {result['_filename']}.")
+        robustness = final_accuracy if final_accuracy is not None else 0.0
+
+    # Efficiency: alpha*(t_base/t_x) + (1-alpha)*(b_base-b_x)/b_base, against the
+    # config-1 (BASE) variant at the same client count in this same folder --
+    # falls back to 0.0 with a warning if that baseline is missing.
+    alpha = 0.5
+    t_base, b_base = efficiency_base_by_clients.get(num_clients, (None, None))
+    t_x = _avg_seconds_per_round(result)
+    if t_base is not None and t_x:
+        b_x = _kb_per_client(result, num_params)
+        efficiency = alpha * (t_base / t_x) + (1 - alpha) * (b_base - b_x) / b_base
+        efficiency = min(1.0, max(0.0, efficiency))
+    else:
+        print(f"Warning: no config-1 baseline timing for num_clients={num_clients} "
+              f"-- Efficiency falls back to 0.0 for {result['_filename']}.")
+        efficiency = 0.0
+
+    return {PRIVACY_KEY: privacy, ROBUSTNESS_KEY: robustness, EFFICIENCY_KEY: efficiency}
+
+
 def visualize_radar_chart(folder: str) -> None:
     """
     Radar/spider chart showing privacy-robustness-performance tradeoff.
 
-    Each config variant gets one polygon on the radar.
-    Three axes: Privacy (1 - normalized_epsilon), Robustness (accuracy_under_attack),
-    Performance (final_accuracy_no_attack baseline comparison).
+    Each config variant gets one polygon on the radar. See
+    _compute_trilemma_scores() for how each of the three axes is computed.
 
     Args:
         folder (str): path to folder containing result JSON files.
@@ -1339,31 +1497,17 @@ def visualize_radar_chart(folder: str) -> None:
     results = load_results(folder)
 
     _, max_epsilon = get_base_accuracy_and_max_epsilon(results)
+    clean_base_run_results = load_results_if_present(CLEAN_BASE_RUN_DIR)
+    clean_base_accuracy_by_clients = _zero_byzantine_base_accuracy_by_clients(results + clean_base_run_results)
+    num_params = sum(p.numel() for p in get_dataset_spec(results[0]["config"].get("dataset", "mnist")).model_fn().parameters())
+    efficiency_base_by_clients = _efficiency_base_by_clients(results, num_params)
 
-    normalized_result_scores = defaultdict(dict)
-    PRIVACY_KEY = "privacy_score"
-    ROBUSTNESS_KEY = "robustness_score"
-    EFFICIENCY_KEY = "efficiency_score"
-    for result in results:
-        config = result["config"]
-        final_accuracy = result["results"]["per_round"][-1].get("accuracy")
-        
-        # privacy
-        if not config["use_dp"]:
-            normalized_result_scores[result["_filename"]][PRIVACY_KEY] = 0.0         # No privacy at all
-        else:
-            normalized_result_scores[result["_filename"]][PRIVACY_KEY] = max(1 - (config["epsilon"] / max_epsilon), 0) # The max is due to currently possible negative epsilon values
-        
-        # robustness
-        normalized_result_scores[result["_filename"]][ROBUSTNESS_KEY] = final_accuracy
-
-        # efficiency
-        if not config["use_topk"]:
-            normalized_result_scores[result["_filename"]][EFFICIENCY_KEY] = 0.0
-        else:
-            normalized_result_scores[result["_filename"]][EFFICIENCY_KEY] = 1 - config["topk_ratio"] 
-            
-
+    normalized_result_scores = {
+        result["_filename"]: _compute_trilemma_scores(
+            result, max_epsilon, num_params, clean_base_accuracy_by_clients, efficiency_base_by_clients,
+        )
+        for result in results
+    }
 
     variants = [(name, values) for name, values in normalized_result_scores.items()]
 
@@ -1415,47 +1559,46 @@ def visualize_radar_chart(folder: str) -> None:
     plt.close()
 
 
-def visualize_radar_chart_per_config(folder: str) -> None:
+def _render_radar_per_config_figure(results, output_path, title, max_epsilon, num_params,
+                                    clean_base_accuracy_by_clients, efficiency_base_by_clients):
     """
-    Radar/spider chart showing privacy-robustness-performance tradeoff.
+    Draw and save one "one subplot per config" radar figure for a given set
+    of results.
 
-    One Subplot per config.
+    Shared by visualize_radar_chart_per_config() for both the joint (every
+    client count together) figure and, when the folder mixes client counts,
+    one additional figure per distinct client count -- see that function's
+    docstring. max_epsilon/num_params/the two baseline dicts are computed
+    once from the *whole* folder's results by the caller and passed through
+    unchanged, so a given variant's scores are identical whether it's drawn
+    in the joint figure or a per-client-count split (only which variants are
+    included differs, not how any one of them is scored).
 
     Args:
-        folder (str): path to folder containing result JSON files.
+        results (list[dict]):       results to draw (already filtered to
+                                    whatever subset this figure should show).
+        output_path (str):          where to save the PNG.
+        title (str):                figure suptitle.
+        max_epsilon (float):        see _compute_trilemma_scores().
+        num_params (int):           see _compute_trilemma_scores().
+        clean_base_accuracy_by_clients (dict[int, float]): see _compute_trilemma_scores().
+        efficiency_base_by_clients (dict[int, tuple[float, float]]): see _compute_trilemma_scores().
+
+    Returns:
+        None
     """
-    results = load_results(folder)
-
-    _, max_epsilon = get_base_accuracy_and_max_epsilon(results)
-
-    PRIVACY_KEY = "privacy_score"
-    ROBUSTNESS_KEY = "robustness_score"
-    EFFICIENCY_KEY = "efficiency_score"
-    config_groups = defaultdict(list)
+    results_by_config = defaultdict(list)
     for result in results:
-        config = result["config"]
-        final_accuracy = result["results"]["per_round"][-1].get("accuracy")
-        
-        # privacy
-        if not config["use_dp"]:
-            privacy = 0.0         # No privacy at all
-        else:
-            privacy = max(1 - (config["epsilon"] / max_epsilon), 0) # DP - The max is due to currently possible negative epsilon values
-        
-        # robustness
-        robustness = final_accuracy                 # FLTrust
+        results_by_config[result["config"]["config_id"]].append(result)
 
-        # efficiency
-        if not config["use_topk"]:
-            efficiency = 0.0
-        else:
-            efficiency = 1 - config["topk_ratio"]                   # TopK
-
-        config_groups[config["config_id"]].append((
-            make_label(result["_filename"]),
-            {PRIVACY_KEY: privacy, ROBUSTNESS_KEY: robustness, EFFICIENCY_KEY: efficiency}
-        ))
-            
+    config_groups = defaultdict(list)
+    for config_id, group_results in results_by_config.items():
+        show_clients = results_have_multiple_client_counts(group_results)
+        for result in group_results:
+            scores = _compute_trilemma_scores(
+                result, max_epsilon, num_params, clean_base_accuracy_by_clients, efficiency_base_by_clients,
+            )
+            config_groups[config_id].append((make_label(result["_filename"], show_clients=show_clients), scores))
 
     axes_labels    = ["Privacy", "Robustness", "Efficiency"]
 
@@ -1464,8 +1607,7 @@ def visualize_radar_chart_per_config(folder: str) -> None:
 
     fig, axes = plt.subplots(2, 4, figsize=(20, 10),
                              subplot_kw=dict(polar=True))
-    fig.suptitle("Privacy - Robustness - Efficiency Trilemma per Config",
-                 fontsize=14)
+    fig.suptitle(title, fontsize=14)
     axes = axes.flatten()
 
     colors = plt.cm.tab10.colors
@@ -1503,10 +1645,59 @@ def visualize_radar_chart_per_config(folder: str) -> None:
         axes[idx].set_visible(False)
 
     plt.tight_layout()
-    output_path = os.path.join(folder, "radar_per_config.png")
     plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
     print(f"Saved to: {output_path}")
     plt.close()
+
+
+def visualize_radar_chart_per_config(folder: str) -> None:
+    """
+    Radar/spider chart showing privacy-robustness-performance tradeoff.
+
+    One subplot per config, one figure combining every client count in
+    folder -- saved as before, at folder/radar_per_config.png. If folder
+    mixes more than one distinct client count, also renders one additional
+    figure per client count (each with the same one-subplot-per-config
+    layout, but only that client count's variants), under
+    radar_per_config/radar_per_config_clients-<N>.png -- mirroring
+    visualize_f1_score()'s per-variant subfolder pattern, so e.g. a 10-client
+    run and a 60-client run don't get their lines crowded onto the same
+    subplot's legend. Skipped entirely when folder has only one client
+    count, since it would be identical to the joint figure.
+
+    Args:
+        folder (str): path to folder containing result JSON files.
+    """
+    results = load_results(folder)
+
+    _, max_epsilon = get_base_accuracy_and_max_epsilon(results)
+    clean_base_run_results = load_results_if_present(CLEAN_BASE_RUN_DIR)
+    clean_base_accuracy_by_clients = _zero_byzantine_base_accuracy_by_clients(results + clean_base_run_results)
+    num_params = sum(p.numel() for p in get_dataset_spec(results[0]["config"].get("dataset", "mnist")).model_fn().parameters())
+    efficiency_base_by_clients = _efficiency_base_by_clients(results, num_params)
+
+    _render_radar_per_config_figure(
+        results, os.path.join(folder, "radar_per_config.png"),
+        "Privacy - Robustness - Efficiency Trilemma per Config",
+        max_epsilon, num_params, clean_base_accuracy_by_clients, efficiency_base_by_clients,
+    )
+
+    if not results_have_multiple_client_counts(results):
+        return
+
+    results_by_clients = defaultdict(list)
+    for result in results:
+        results_by_clients[result["config"]["num_clients"]].append(result)
+
+    output_dir = os.path.join(folder, "radar_per_config")
+    os.makedirs(output_dir, exist_ok=True)
+    for num_clients in sorted(results_by_clients):
+        _render_radar_per_config_figure(
+            results_by_clients[num_clients],
+            os.path.join(output_dir, f"radar_per_config_clients-{num_clients}.png"),
+            f"Privacy - Robustness - Efficiency Trilemma per Config (clients={num_clients})",
+            max_epsilon, num_params, clean_base_accuracy_by_clients, efficiency_base_by_clients,
+        )
 
 
 def _descriptive_variant_filename(filename: str, ext: str) -> str:
@@ -1789,61 +1980,73 @@ def visualize_f1_tables(folder: str) -> None:
 
 def visualize_label_distribution(folder: str) -> None:
     """
-    Stacked bar chart of label counts in the root set and each client's shard.
+    Stacked bar chart of label counts in the root set and each client's shard,
+    one file per distinct client count found in folder.
 
-    The split is identical across every variant in a run folder (same
-    root_dataset_size/num_clients/seed), so this reads the label_distribution
-    block from any one result file. Older result files saved before this
-    field existed are skipped gracefully.
+    The split only depends on num_clients (root_dataset_size/seed don't vary
+    within a run) -- previously read from "any one" result file in the whole
+    folder, which silently showed the wrong split whenever a folder mixed
+    multiple client counts (e.g. NUM_CLIENTS sweeps in
+    run_configurations.py). Now groups results by num_clients and renders one
+    chart per group instead, under label_distribution/, mirroring
+    visualize_confusion_matrices()'s per-variant restructuring. Results
+    without a label_distribution field (older files) are skipped.
 
     Args:
         folder (str): path to folder containing result JSON files.
     """
     results = load_results(folder)
 
-    label_distribution = None
+    results_by_clients = defaultdict(list)
     for result in results:
-        label_distribution = result["results"].get("label_distribution")
-        if label_distribution is not None:
-            break
+        if result["results"].get("label_distribution") is not None:
+            results_by_clients[result["config"]["num_clients"]].append(result)
 
-    if label_distribution is None:
+    if not results_by_clients:
         print("No label_distribution field found in any result file -- skipping label distribution plot.")
         return
 
-    os.makedirs(os.path.join(folder, "label_distribution"), exist_ok=True)
+    output_dir = os.path.join(folder, "label_distribution")
+    os.makedirs(output_dir, exist_ok=True)
 
     num_classes  = get_dataset_spec(results[0]["config"].get("dataset", "mnist")).num_classes
     digit_labels = [str(i) for i in range(num_classes)]
     colors = plt.cm.tab10.colors
 
-    bar_names = ["Root"] + [f"C{cid}" for cid in sorted(label_distribution["clients"], key=int)]
-    bar_data  = [label_distribution["root"]] + [
-        label_distribution["clients"][cid] for cid in sorted(label_distribution["clients"], key=int)
-    ]
+    saved = 0
+    for num_clients in sorted(results_by_clients):
+        # Split is identical across every variant at this client count -- any one will do.
+        label_distribution = results_by_clients[num_clients][0]["results"]["label_distribution"]
 
-    fig, ax = plt.subplots(figsize=(max(10, len(bar_names) * 0.4), 6))
-    ax.set_title("Label Distribution: Root Dataset + Each Client's Train Shard", fontsize=13)
-    ax.set_ylabel("Sample count")
-    ax.grid(axis="y", alpha=0.3)
+        bar_names = ["Root"] + [f"C{cid}" for cid in sorted(label_distribution["clients"], key=int)]
+        bar_data  = [label_distribution["root"]] + [
+            label_distribution["clients"][cid] for cid in sorted(label_distribution["clients"], key=int)
+        ]
 
-    x = np.arange(len(bar_names))
-    bottom = np.zeros(len(bar_names))
-    for digit, color in zip(digit_labels, colors):
-        heights = np.array([counts.get(digit, 0) for counts in bar_data])
-        ax.bar(x, heights, bottom=bottom, color=color, width=0.8, label=digit)
-        bottom += heights
+        fig, ax = plt.subplots(figsize=(max(10, len(bar_names) * 0.4), 6))
+        ax.set_title(f"Label Distribution: Root Dataset + Each Client's Train Shard (clients={num_clients})", fontsize=13)
+        ax.set_ylabel("Sample count")
+        ax.grid(axis="y", alpha=0.3)
 
-    ax.set_xticks(x)
-    ax.set_xticklabels(bar_names, fontsize=6 if len(bar_names) > 20 else 8, rotation=90)
-    ax.legend(title="Digit", fontsize=7, loc="upper center",
-              bbox_to_anchor=(0.5, -0.15), ncol=10, framealpha=0.8)
+        x = np.arange(len(bar_names))
+        bottom = np.zeros(len(bar_names))
+        for digit, color in zip(digit_labels, colors):
+            heights = np.array([counts.get(digit, 0) for counts in bar_data])
+            ax.bar(x, heights, bottom=bottom, color=color, width=0.8, label=digit)
+            bottom += heights
 
-    plt.tight_layout()
-    output_path = os.path.join(folder, "label_distribution", "label_distribution.png")
-    plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
-    print(f"Saved to: {output_path}")
-    plt.close()
+        ax.set_xticks(x)
+        ax.set_xticklabels(bar_names, fontsize=6 if len(bar_names) > 20 else 8, rotation=90)
+        ax.legend(title="Digit", fontsize=7, loc="upper center",
+                  bbox_to_anchor=(0.5, -0.15), ncol=10, framealpha=0.8)
+
+        plt.tight_layout()
+        output_path = os.path.join(output_dir, f"label_distribution_clients-{num_clients}.png")
+        plt.savefig(_io_path(output_path), dpi=150, bbox_inches="tight")
+        plt.close()
+        saved += 1
+
+    print(f"Saved {saved} label distribution chart(s) to: {output_dir}")
 
 
 # TopK ratios to show in visualize_bytes_per_client_topk() -- 0.01/0.1/0.5 match
@@ -1978,6 +2181,7 @@ def visualize_trust_per_client(folder: str) -> None:
         print("No non-DP FLTrust-enabled result files found -- skipping per-client trust plot.")
         return
     results.sort(key=lambda r: (r["config"]["config_id"], r["_filename"]))
+    show_clients = results_have_multiple_client_counts(results)
 
     fig, ax = plt.subplots(figsize=(max(10, len(results) * 1.3), 6))
     ax.set_title("Average Trust per Client over the Run (FLTrust configs only)", fontsize=13)
@@ -2005,7 +2209,7 @@ def visualize_trust_per_client(folder: str) -> None:
             ax.hlines(np.mean(malicious_vals), x - 0.3, x + 0.3, color=MALICIOUS_COLOR, linewidth=2, zorder=4)
 
         tick_pos.append(x)
-        tick_lab.append(make_label(result["_filename"]))
+        tick_lab.append(make_label(result["_filename"], show_clients=show_clients))
 
     ax.set_xticks(tick_pos)
     ax.set_xticklabels(tick_lab, fontsize=7, rotation=45, ha="right")
