@@ -18,7 +18,7 @@ from src.server import run_simulation_with_config, resolve_device
 # regardless of the cwd the script happens to be invoked from.
 RESULTS_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "results"))
 
-DEFAULT_DATASET = "cifar10"   # "mnist" or "cifar10" -> same dataset for every config in a run, edit here to switch it.
+DEFAULT_DATASET = "mnist"   # "mnist" or "cifar10" -> same dataset for every config in a run, edit here to switch it.
 DEFAULT_MAX_CPUS = 25
 DEFAULT_MAX_GPU_CLIENTS = 4   # Only applies for dataset="cifar10" (see resolve_device()
                               # in server.py) -- caps how many simulated clients share
@@ -29,7 +29,13 @@ DEFAULT_GPU_INDEX = 0         # None -> auto-pick the GPU with most free VRAM.
 SHARED_PARAMS = dict(
     dataset = DEFAULT_DATASET,
     num_clients = 50,
-    num_rounds = 400,
+    num_rounds = 500,  # TEMPORARY: overridden from 250 to 500 to exactly match the
+                        # existing results/clean_base_run/ entries (verified against
+                        # their saved config blocks -- every other field here already
+                        # matches). Revert to 250 together with NUM_CLIENTS (below)
+                        # once the clients=50 clean baseline has been run (see
+                        # TODO.md item 3) -- both are shared by every other config's
+                        # sweep, including the currently-running attacked grid.
     num_byzantine = 20,   # byzantine_fraction = num_byzantine/num_clients = 0.4
     root_dataset_size = 2000,
     rescale_to_ref_norm = False,
@@ -97,7 +103,11 @@ BASE_CONFIGS = {
 EPSILON_VALUES = [1.0, 10.0]
 TOPK_VALUES = [0.01, 0.1]
 RL_VALUES = [10]
-NUM_CLIENTS = [10, 30, 60]
+NUM_CLIENTS = [50]  # TEMPORARY: set to just the missing clean_base_run client count (see
+                     # TODO.md item 3) so `--config 1 --no-attack` produces exactly that one
+                     # file. Change back to [80] (or whatever item 5's sweep needs) before/
+                     # after running this -- this constant is shared with the unrelated,
+                     # currently-running attacked clients=80 grid sweep.
 
 
 def expand_config(base: ExperimentConfig) -> list[ExperimentConfig]:

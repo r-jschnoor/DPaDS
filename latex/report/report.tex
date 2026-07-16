@@ -386,26 +386,26 @@
 		\item \ac{DP} budget $\varepsilon \in [1;5;10]$
 		\item Top-$k$ sparsification threshold $k \in [1\%;10\%;50\%]$
 	\end{itemize}
-	\subsection{Software Stack}
-	
-	\begin{itemize}
-		\item \textbf{Flower} (flwr)~\cite{beutel2020flower} --- \ac{FL} orchestration,
-		client/server simulation, strategy interface.
-		\item \textbf{Opacus}~\cite{yousefpour2021opacus} --- \ac{DP-SGD}
-		\item \textbf{FLTrust}~\cite{cao2021fltrust} --- FLTrust defense implementation.
-		\item \textbf{Custom} --- Top-$k$ gradient sparsification wrapper.
-	\end{itemize}
-	
-	\placeholder{%
-		Software versions; hardware (GPU/CPU); random seed management; number of
-		independent runs per configuration.%
-	}
+
+	\subsection{Setup}
+	The setup for the research in this work is as follows.
+
+	\paragraph{Hardware} All meaningful computation was executed on a single Linux machine
+	(Debian, kernel 6.1.0-48-amd64) with an AMD Ryzen Threadripper PRO 5955WX (16 cores / 32
+	threads) and 125\,GiB of RAM, using 1$\times$ NVIDIA RTX 4090 GPUs (24\,GB VRAM each) for
+	the CIFAR-10 experiments. MNIST experiments ran solely on CPU. Local training was parallelized across up to 25 concurrent Ray workers.
+
+	\paragraph{Software} The project targets Python 3.11+ (specifically tested on 3.11.2 and 3.12.3) and uses \textbf{Flower} (flwr)~\cite{beutel2020flower} 1.31.0 for \ac{FL} orchestration and	client/server simulation, \textbf{Opacus}~\cite{yousefpour2021opacus} 1.6.0 for	\ac{DP-SGD}, as well as a custom Top-$k$ sparsification wrapper for the compression mechanism. \textbf{FLTrust} is implemented directly following Cao et al.~\cite{cao2021fltrust}, on top of PyTorch 2.6.0. For a comprehensive dependency list, see the project's repository (Section~\ref{ssec:reproducibility}).
+
+	Each of the eight configurations in Table \ref{table:grid} is run once per swept parameter permutation. The seed is fixed to allow comparison between different runs.
+
 	
 	\subsection{Reproducibility}
-	
+	\label{ssec:reproducibility}
+	The full implementation is available in our project's repository (\placeholder{Repo URL}). Each of the eight configurations in Table \ref{table:grid} can be directly reproduced from the command line through a separate execution script \texttt{run\_configurations.py}, albeit changing parameters needs to be done in the script itself. A fixed seed ensures a equivalent initial model and data split, allowing separate runs to be comparable. Results are written as JSON into \texttt{src/results/} with one file per configuration variant. With a second script \texttt{visualize\_results.py}, the results can be processed into plots and other formats.
+
 	\placeholder{%
-		Pointer to open-source repository; instructions to replicate all 8 configurations;
-		fixed random seeds; containerization (Docker/Conda environment file).%
+		TODO: Link to github repo; include code to run configs; talk about installation of venv and packages%
 	}
 	
 	% --------------------------------------------------
@@ -698,58 +698,61 @@
 		\multicolumn{11}{r}{\textit{Continued on next page}}\\
 		\endfoot
 		\bottomrule
-		\multicolumn{11}{@{}p{16cm}@{}}{\footnotesize $\mu_{\text{h}}$/$\sigma_{\text{h}}$: mean/std of the \gls{trustscore} assigned to \glspl{honestclient}; $\mu_{\text{m}}$/$\sigma_{\text{m}}$: mean/std of the \gls{trustscore} assigned to \glspl{maliciousclient} (FLTrust-based configurations only).}\\
+		\multicolumn{11}{@{}p{16cm}@{}}{\footnotesize $\mu_{\text{h}}$/$\sigma_{\text{h}}$: mean/std of the trust score assigned to honest clients; $\mu_{\text{m}}$/$\sigma_{\text{m}}$: mean/std of the trust score assigned to malicious clients (FLTrust-based configurations only).}\\
 		\endlastfoot
-		\multirow{1}{*}{\textbf{BASE}} & 50 & -- & -- & 423.5 & -- & 0.7826 & -- & -- & -- & -- \\
+		\multirow{1}{*}{\textbf{BASE}} & 50 & -- & -- & 423.5 & \textbf{0.1970} & \textbf{0.7826} & -- & -- & -- & -- \\
 		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
-		\multirow{4}{*}{\textbf{DP}} & 50 & 1 & -- & 423.5 & -- & 0.5728 & -- & -- & -- & -- \\
-		& 50 & 5 & -- & 423.5 & -- & 0.5825 & -- & -- & -- & -- \\
-		& 50 & 10 & -- & 423.5 & -- & 0.5750 & -- & -- & -- & -- \\
-		& 50 & 25 & -- & 423.5 & -- & 0.5747 & -- & -- & -- & -- \\
+		\multirow{4}{*}{\textbf{DP}} & 50 & 1 & -- & 423.5 & 0.4068 & 0.5728 & -- & -- & -- & -- \\
+		& 50 & 5 & -- & 423.5 & \textbf{0.3971} & \textbf{0.5825} & -- & -- & -- & -- \\
+		& 50 & 10 & -- & 423.5 & 0.4046 & 0.5750 & -- & -- & -- & -- \\
+		& 50 & 25 & -- & 423.5 & 0.4049 & 0.5747 & -- & -- & -- & -- \\
 		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
-		\multirow{1}{*}{\textbf{FLTrust}} & 50 & -- & -- & 423.5 & -- & 0.9346 & 0.6183 & 0.2788 & 0.2378 & 0.3310 \\
+		\multirow{1}{*}{\textbf{FLTrust}} & 50 & -- & -- & 423.5 & \textbf{0.0450} & \textbf{0.9346} & 0.6183 & 0.2788 & 0.2378 & 0.3310 \\
 		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
-		\multirow{3}{*}{\textbf{TopK}} & 50 & -- & 0.01 & 8.5 & -- & 0.7529 & -- & -- & -- & -- \\
-		& 50 & -- & 0.1 & 84.7 & -- & 0.7829 & -- & -- & -- & -- \\
-		& 50 & -- & 0.5 & 423.5 & -- & 0.7825 & -- & -- & -- & -- \\
+		\multirow{3}{*}{\textbf{TopK}} & 50 & -- & 0.01 & 8.5 & 0.2267 & 0.7529 & -- & -- & -- & -- \\
+		& 50 & -- & 0.1 & 84.7 & 0.1967 & 0.7829 & -- & -- & -- & -- \\
+		& 50 & -- & 0.5 & 423.5 & 0.1971 & 0.7825 & -- & -- & -- & -- \\
 		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
-		\multirow{4}{*}{\textbf{DP + FLTrust}} & 50 & 1 & -- & 423.5 & -- & 0.1170 & 0.0059 & 0.0031 & 0.0051 & 0.0030 \\
-		& 50 & 5 & -- & 423.5 & -- & 0.1694 & 0.0213 & 0.0042 & 0.0178 & 0.0043 \\
-		& 50 & 10 & -- & 423.5 & -- & 0.1407 & 0.0301 & 0.0052 & 0.0248 & 0.0055 \\
-		& 50 & 25 & -- & 423.5 & -- & 0.1314 & 0.0426 & 0.0066 & 0.0346 & 0.0071 \\
+		\multirow{4}{*}{\textbf{DP + FLTrust}} & 50 & 1 & -- & 423.5 & 0.8626 & 0.1170 & 0.0059 & 0.0031 & 0.0051 & 0.0030 \\
+		& 50 & 5 & -- & 423.5 & 0.8102 & 0.1694 & 0.0213 & 0.0042 & 0.0178 & 0.0043 \\
+		& 50 & 10 & -- & 423.5 & 0.8389 & 0.1407 & 0.0301 & 0.0052 & 0.0248 & 0.0055 \\
+		& 50 & 25 & -- & 423.5 & 0.8482 & 0.1314 & 0.0426 & 0.0066 & 0.0346 & 0.0071 \\
 		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
-		\multirow{12}{*}{\textbf{DP + TopK}} & 50 & 1 & 0.01 & 8.5 & -- & 0.1032 & -- & -- & -- & -- \\
-		& 50 & 5 & 0.01 & 8.5 & -- & 0.1093 & -- & -- & -- & -- \\
-		& 50 & 10 & 0.01 & 8.5 & -- & 0.1055 & -- & -- & -- & -- \\
-		& 50 & 25 & 0.01 & 8.5 & -- & 0.1041 & -- & -- & -- & -- \\
-		& 50 & 1 & 0.1 & 84.7 & -- & 0.3913 & -- & -- & -- & -- \\
-		& 50 & 5 & 0.1 & 84.7 & -- & 0.3549 & -- & -- & -- & -- \\
-		& 50 & 10 & 0.1 & 84.7 & -- & 0.3647 & -- & -- & -- & -- \\
-		& 50 & 25 & 0.1 & 84.7 & -- & 0.3944 & -- & -- & -- & -- \\
-		& 50 & 1 & 0.5 & 423.5 & -- & 0.5684 & -- & -- & -- & -- \\
-		& 50 & 5 & 0.5 & 423.5 & -- & 0.5771 & -- & -- & -- & -- \\
-		& 50 & 10 & 0.5 & 423.5 & -- & 0.5705 & -- & -- & -- & -- \\
-		& 50 & 25 & 0.5 & 423.5 & -- & 0.5671 & -- & -- & -- & -- \\
+		\multirow{12}{*}{\textbf{DP + TopK}} & 50 & 1 & 0.01 & 8.5 & 0.8764 & 0.1032 & -- & -- & -- & -- \\
+		& 50 & 5 & 0.01 & 8.5 & 0.8703 & 0.1093 & -- & -- & -- & -- \\
+		& 50 & 10 & 0.01 & 8.5 & 0.8741 & 0.1055 & -- & -- & -- & -- \\
+		& 50 & 25 & 0.01 & 8.5 & 0.8755 & 0.1041 & -- & -- & -- & -- \\
+		& 50 & 1 & 0.1 & 84.7 & 0.5883 & 0.3913 & -- & -- & -- & -- \\
+		& 50 & 5 & 0.1 & 84.7 & 0.6247 & 0.3549 & -- & -- & -- & -- \\
+		& 50 & 10 & 0.1 & 84.7 & 0.6149 & 0.3647 & -- & -- & -- & -- \\
+		& 50 & 25 & 0.1 & 84.7 & 0.5852 & 0.3944 & -- & -- & -- & -- \\
+		& 50 & 1 & 0.5 & 423.5 & 0.4112 & 0.5684 & -- & -- & -- & -- \\
+		& 50 & 5 & 0.5 & 423.5 & 0.4025 & 0.5771 & -- & -- & -- & -- \\
+		& 50 & 10 & 0.5 & 423.5 & 0.4091 & 0.5705 & -- & -- & -- & -- \\
+		& 50 & 25 & 0.5 & 423.5 & 0.4125 & 0.5671 & -- & -- & -- & -- \\
 		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
-		\multirow{3}{*}{\textbf{FLTrust + TopK}} & 50 & -- & 0.01 & 8.5 & -- & 0.8891 & 0.4659 & 0.2176 & 0.2063 & 0.2651 \\
-		& 50 & -- & 0.1 & 84.7 & -- & 0.9295 & 0.5866 & 0.2653 & 0.2266 & 0.3155 \\
-		& 50 & -- & 0.5 & 423.5 & -- & 0.9347 & 0.6181 & 0.2789 & 0.2377 & 0.3308 \\
+		\multirow{3}{*}{\textbf{FLTrust + TopK}} & 50 & -- & 0.01 & 8.5 & 0.0905 & 0.8891 & 0.4659 & 0.2176 & 0.2063 & 0.2651 \\
+		& 50 & -- & 0.1 & 84.7 & 0.0501 & 0.9295 & 0.5866 & 0.2653 & 0.2266 & 0.3155 \\
+		& 50 & -- & 0.5 & 423.5 & 0.0449 & 0.9347 & 0.6181 & 0.2789 & 0.2377 & 0.3308 \\
 		\arrayrulecolor{gray!60}\midrule\arrayrulecolor{black}
-		\multirow{12}{*}{\textbf{ALL}} & 50 & 1 & 0.01 & 8.5 & -- & 0.1076 & 0.0023 & 0.0024 & 0.0020 & 0.0023 \\
-		& 50 & 5 & 0.01 & 8.5 & -- & 0.1193 & 0.0070 & 0.0033 & 0.0059 & 0.0032 \\
-		& 50 & 10 & 0.01 & 8.5 & -- & 0.1584 & 0.0101 & 0.0035 & 0.0086 & 0.0035 \\
-		& 50 & 25 & 0.01 & 8.5 & -- & 0.1813 & 0.0147 & 0.0041 & 0.0125 & 0.0042 \\
-		& 50 & 1 & 0.1 & 84.7 & -- & 0.1110 & 0.0042 & 0.0028 & 0.0037 & 0.0028 \\
-		& 50 & 5 & 0.1 & 84.7 & -- & 0.1829 & 0.0149 & 0.0036 & 0.0125 & 0.0036 \\
-		& 50 & 10 & 0.1 & 84.7 & -- & 0.1658 & 0.0211 & 0.0043 & 0.0175 & 0.0044 \\
-		& 50 & 25 & 0.1 & 84.7 & -- & 0.1349 & 0.0295 & 0.0054 & 0.0243 & 0.0057 \\
-		& 50 & 1 & 0.5 & 423.5 & -- & 0.1158 & 0.0057 & 0.0030 & 0.0049 & 0.0030 \\
-		& 50 & 5 & 0.5 & 423.5 & -- & 0.1720 & 0.0206 & 0.0041 & 0.0172 & 0.0042 \\
-		& 50 & 10 & 0.5 & 423.5 & -- & 0.1421 & 0.0291 & 0.0051 & 0.0240 & 0.0054 \\
-		& 50 & 25 & 0.5 & 423.5 & -- & 0.1314 & 0.0411 & 0.0064 & 0.0335 & 0.0069 \\
+		\multirow{12}{*}{\textbf{ALL}} & 50 & 1 & 0.01 & 8.5 & 0.8720 & 0.1076 & 0.0023 & 0.0024 & 0.0020 & 0.0023 \\
+		& 50 & 5 & 0.01 & 8.5 & 0.8603 & 0.1193 & 0.0070 & 0.0033 & 0.0059 & 0.0032 \\
+		& 50 & 10 & 0.01 & 8.5 & 0.8212 & 0.1584 & 0.0101 & 0.0035 & 0.0086 & 0.0035 \\
+		& 50 & 25 & 0.01 & 8.5 & 0.7983 & 0.1813 & 0.0147 & 0.0041 & 0.0125 & 0.0042 \\
+		& 50 & 1 & 0.1 & 84.7 & 0.8686 & 0.1110 & 0.0042 & 0.0028 & 0.0037 & 0.0028 \\
+		& 50 & 5 & 0.1 & 84.7 & 0.7967 & 0.1829 & 0.0149 & 0.0036 & 0.0125 & 0.0036 \\
+		& 50 & 10 & 0.1 & 84.7 & 0.8138 & 0.1658 & 0.0211 & 0.0043 & 0.0175 & 0.0044 \\
+		& 50 & 25 & 0.1 & 84.7 & 0.8447 & 0.1349 & 0.0295 & 0.0054 & 0.0243 & 0.0057 \\
+		& 50 & 1 & 0.5 & 423.5 & 0.8638 & 0.1158 & 0.0057 & 0.0030 & 0.0049 & 0.0030 \\
+		& 50 & 5 & 0.5 & 423.5 & 0.8076 & 0.1720 & 0.0206 & 0.0041 & 0.0172 & 0.0042 \\
+		& 50 & 10 & 0.5 & 423.5 & 0.8375 & 0.1421 & 0.0291 & 0.0051 & 0.0240 & 0.0054 \\
+		& 50 & 25 & 0.5 & 423.5 & 0.8482 & 0.1314 & 0.0411 & 0.0064 & 0.0335 & 0.0069 \\
 		\caption{Final and delta accuracy (relative to the no-attack BASE run), transferred payload per client per round, and per-round \gls{trustscore} statistics (mean/std for honest and \glspl{maliciousclient}, applicable only to FLTrust-based configurations) across all evaluated configurations. Unless noted otherwise, all runs use a Byzantine client fraction of $0.4$ and $50$ \glspl{communicationround}.}
 		\label{tab:accuracy-summary_exp1}
 	\end{longtable}
+
+
+	
 
 	\clearpage
 	\subsection*{Experimental run on MNIST dataset with 500 rounds of 10 \glspl{localsgdstep} each, $n\in\{10,30,60\}, \eta=0.2$, \gls{attackscale} = 2.0}
